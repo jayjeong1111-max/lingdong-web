@@ -26,6 +26,21 @@
   .btns button:active { transform:scale(.97); }
   a.home { position:fixed; top:16px; left:16px; z-index:3; font-size:13px; color:var(--muted); text-decoration:none; background:rgba(246,241,223,.8); padding:4px 10px; }
   #summary { display:none; }
+  #fish.hot { cursor:pointer; }
+  #card { position:fixed; left:16px; top:52px; z-index:4; width:min(320px, calc(100vw - 32px)); max-height:calc(100vh - 230px); overflow-y:auto;
+    background:rgba(250,246,234,.95); backdrop-filter:blur(6px); border:1px solid #d9cdb6; border-top:3px solid var(--pc, #2a2622);
+    padding:16px 18px 14px; font-size:13px; line-height:1.65; color:var(--ink); box-shadow:0 10px 30px -18px rgba(40,30,10,.45);
+    opacity:0; transform:translateY(-6px); pointer-events:none; transition:opacity .35s ease, transform .35s cubic-bezier(.2,.8,.2,1); }
+  #card.open { opacity:1; transform:none; pointer-events:auto; }
+  #card .x { position:absolute; top:8px; right:10px; border:0; background:none; font-size:16px; color:var(--muted); cursor:pointer; padding:4px; }
+  #card h4 { font-size:16px; font-weight:500; font-style:italic; margin:0 22px 4px 0; }
+  #card .badge { display:inline-block; font-size:11.5px; color:#fff; background:var(--pc); padding:1px 8px; letter-spacing:.05em; margin-bottom:10px; }
+  #card dl { display:grid; grid-template-columns:auto 1fr; gap:2px 12px; margin:0 0 10px; font-size:12.5px; }
+  #card dt { color:var(--muted); } #card dd { margin:0; }
+  #card .story { border-top:1px solid #e3d8c2; padding-top:10px; margin-top:4px; }
+  #card .story b { font-weight:500; font-size:12px; color:var(--seal); letter-spacing:.06em; display:block; margin-bottom:4px; }
+  #card .last { margin-top:10px; font-size:12.5px; color:var(--muted); border-left:2px solid var(--pc); padding-left:8px; }
+  @media (max-width:560px){ #card { top:auto; bottom:150px; max-height:45vh; } }
   @media (max-width:560px){ .bar{flex-direction:column; align-items:stretch;} .caption{max-width:none;} .btns{justify-content:flex-end;} }
 </style>
 </head>
@@ -34,6 +49,7 @@
 <canvas id="field" class="full"></canvas>
 <canvas id="fish" class="full"></canvas>
 <a class="home" href="../">← 山水·非花</a>
+<aside id="card" aria-live="polite"><button class="x" aria-label="닫기">✕</button><div id="card-body"></div></aside>
 <div id="loader"><p id="load-text">꽃 한 송이를 고르는 중…</p></div>
 <div class="bar">
   <div class="caption">
@@ -54,6 +70,7 @@
 <script src="../shared/nonflowers-fast.js"></script>
 <script src="../shared/panel.js"></script>
 <script src="../shared/flower-params.js"></script>
+<script src="personalities.js"></script>
 <script>
 (() => {
   const DPR = Math.min(window.devicePixelRatio || 1, 2);
@@ -72,6 +89,7 @@
     seed: SEED, plantType: 'auto',
     style: 'mix', rows: 6, density: 1, plantSize: 1, variants: 4, mist: 0.1,
     fishCount: 10, fishSize: 1, fishSpeed: 1, fishLift: 1, bodyOpacity: 0.88,
+    talk: true, mood: 'random', swear: true, talkInterval: 16, maxBubbles: 3,
     palette: 'koi', wcOpacity: 110, wcBleed: 0.2, wcTexture: 0.5, wcBorder: 0.55, wcLayers: 2,
     lineMode: 'ink', inkAlpha: 0.85, brushName: 'pen', brushWeight: 1, brushLines: 40, wiggle: 0.6,
     bgWash: true, waterColor: '#a9c8c4',
@@ -464,12 +482,14 @@
       x: rnd() * W, y: H * (0.1 + rnd() * 0.75),
       heading: (dir < 0 ? Math.PI : 0) + (rnd() - 0.5) * 0.6,
       speed, phase: rnd() * 10, turn: 0, facing: dir, alpha: 0,
+      persona: pickPersona(V.mood, rnd), short: data.name.split(' ')[0],
+      nextTalk: performance.now() / 1000 + 2 + rnd() * 10, bubble: null, pending: null, chatCool: 0, lastLine: '',
     };
   }
 
   function updateNames() {
     document.getElementById('names').textContent =
-      fishes.length ? `물고기 ${fishes.length}마리 — ` + fishes.map((f) => f.name).join(', ') : '물고기가 헤엄쳐 오는 중…';
+      fishes.length ? `물고기 ${fishes.length}마리 — ` + fishes.map((f) => `${f.name}(${f.persona.label})`).join(', ') : '물고기가 헤엄쳐 오는 중…';
   }
   worker.onmessage = (e) => {
     if (e.data.gen !== generation) return;
@@ -497,6 +517,149 @@
     }
     statusEl.textContent = '';
   }
+
+  // ---------- talking ----------
+  const clock = () => performance.now() / 1000;
+  let lastBubbleAt = 0, selected = null;
+  const censor = (t) => SWEARS.reduce((a, w) => a.split(w).join('#'.repeat(w.length)), t);
+  function say(f, kind, other) {
+    const lines = f.persona[kind];
+    let i = Math.floor(Math.random() * lines.length);
+    if (lines[i] === f.lastLine && lines.length > 1) i = (i + 1) % lines.length;
+    f.lastLine = lines[i];
+    let text = lines[i].replace('{name}', other ? other.short : '');
+    if (!V.swear) text = censor(text);
+    const t = clock();
+    f.bubble = { text, t0: t, dur: Math.min(7.5, Math.max(2.8, 2.4 + text.length * 0.085)) };
+    lastBubbleAt = t;
+    if (f === selected) renderCard();
+  }
+  const nextGap = () => V.talkInterval * (0.6 + Math.random() * 0.9);
+  function talkTick() {
+    const t = clock();
+    if (!V.talk) { for (const f of fishes) { f.bubble = null; f.pending = null; } return; }
+    let active = 0;
+    for (const f of fishes) {
+      if (f.bubble && t > f.bubble.t0 + f.bubble.dur) { f.bubble = null; f.nextTalk = t + nextGap(); }
+      if (f.bubble) active++;
+    }
+    // replies always get their turn so a conversation is not cut off
+    for (const f of fishes) if (f.pending && t >= f.pending.at && !f.bubble) {
+      if (fishes.includes(f.pending.from)) { say(f, 'reply', f.pending.from); active++; }
+      f.pending = null;
+    }
+    if (active >= V.maxBubbles || t - lastBubbleAt < 1.6) return;
+    // two fish passing close by may greet each other
+    const near = Math.min(W, H) * 0.14 * V.fishSize;
+    for (let i = 0; i < fishes.length; i++) for (let j = i + 1; j < fishes.length; j++) {
+      const a = fishes[i], b = fishes[j];
+      if (a.bubble || b.bubble || a.pending || b.pending || t < a.chatCool || t < b.chatCool) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) > near || Math.random() > 0.02) continue;
+      const [sp, li] = Math.random() < 0.5 ? [a, b] : [b, a];
+      say(sp, 'greet', li);
+      li.pending = { at: t + 1.6 + Math.random() * 0.8, from: sp };
+      a.chatCool = b.chatCool = t + 30;
+      return;
+    }
+    // otherwise the fish whose turn is most overdue says something
+    let due = null;
+    for (const f of fishes) if (!f.bubble && !f.pending && f.alpha > 0.9 && t >= f.nextTalk && (!due || f.nextTalk < due.nextTalk)) due = f;
+    if (due) say(due, 'idle');
+  }
+
+  function wrap(ctx, text, maxW) {
+    const out = []; let line = '';
+    for (const ch of text) {
+      if (ctx.measureText(line + ch).width > maxW && line) {
+        const sp = line.lastIndexOf(' ');
+        if (sp > line.length * 0.5) { out.push(line.slice(0, sp)); line = line.slice(sp + 1) + ch; }
+        else { out.push(line); line = ch.trim(); }
+      } else line += ch;
+    }
+    if (line) out.push(line);
+    return out;
+  }
+  function drawBubble(f, t) {
+    const b = f.bubble, age = t - b.t0, left = b.t0 + b.dur - t;
+    const a = Math.min(1, age / 0.25, left / 0.4) * f.alpha;
+    if (a <= 0) return;
+    const g = gctx;
+    g.save();
+    g.globalAlpha = a;
+    g.font = '13px "Noto Serif KR", serif';
+    const lines = wrap(g, b.text, 190);
+    const lh = 19, padX = 11, padY = 8;
+    const tw = Math.max(...lines.map((l) => g.measureText(l).width));
+    g.font = 'italic 10.5px "Noto Serif KR", serif';
+    const tag = `${f.short} · ${f.persona.label}`;
+    const bw = Math.max(tw, g.measureText(tag).width) + padX * 2;
+    const bh = lines.length * lh + padY * 2 + 15;
+    const fishTop = f.y - (f.h * f._s) / 2;
+    let bx = f.x - bw / 2, by = fishTop - bh - 14 - (1 - Math.min(1, age / 0.25)) * -6;
+    bx = Math.max(8, Math.min(W - bw - 8, bx));
+    const flip = by < 8;                          // no room above → show below the fish
+    if (flip) by = f.y + (f.h * f._s) / 2 + 14;
+    g.fillStyle = 'rgba(252,249,240,.96)';
+    g.strokeStyle = f.persona.color;
+    g.lineWidth = f.persona.tone <= -2 ? 1.6 : 1;
+    g.beginPath();
+    g.roundRect(bx, by, bw, bh, 9);
+    const tx = Math.max(bx + 14, Math.min(bx + bw - 14, f.x));
+    if (!flip) { g.moveTo(tx - 7, by + bh); g.lineTo(tx, by + bh + 9); g.lineTo(tx + 7, by + bh); }
+    else { g.moveTo(tx - 7, by); g.lineTo(tx, by - 9); g.lineTo(tx + 7, by); }
+    g.fill(); g.stroke();
+    g.fillStyle = f.persona.color;
+    g.fillText(tag, bx + padX, by + padY + 10);
+    g.fillStyle = '#2a2622';
+    g.font = '13px "Noto Serif KR", serif';
+    lines.forEach((l, i) => g.fillText(l, bx + padX, by + padY + 15 + (i + 1) * lh - 5));
+    g.restore();
+  }
+
+  // ---------- profile card ----------
+  const card = document.getElementById('card');
+  card.querySelector('.x').onclick = () => { selected = null; card.classList.remove('open'); };
+  const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  // 이/가: pick by whether the last syllable has a final consonant
+  const josa = (w) => { const c = w.charCodeAt(w.length - 1) - 0xac00; return c >= 0 && c <= 11171 && c % 28 ? '이' : '가'; };
+  function renderCard() {
+    const f = selected; if (!f) return;
+    const p = f.profile || (f.profile = makeProfile(f));
+    const story = V.swear ? p.story : p.story.map(censor);
+    card.style.setProperty('--pc', f.persona.color);
+    document.getElementById('card-body').innerHTML = `
+      <h4>${esc(f.name)}</h4>
+      <span class="badge">${esc(f.persona.label)}</span>
+      <dl>
+        <dt>몸길이</dt><dd>${p.cm}cm · ${esc(p.weight)}</dd>
+        <dt>나이</dt><dd>${p.age}살</dd>
+        <dt>체형</dt><dd>${esc(p.body)}</dd>
+        <dt>고향</dt><dd>${esc(p.home)}</dd>
+        <dt>습관</dt><dd>${esc(p.zone)}에서 ${esc(p.pace)} 헤엄친다</dd>
+        <dt>좋아하는 꽃</dt><dd>${esc(p.flower)}</dd>
+        <dt>좋아하는 것</dt><dd>${esc(p.likes.join(', '))}</dd>
+        <dt>싫어하는 것</dt><dd>${esc(p.dislikes.join(', '))}</dd>
+      </dl>
+      <div class="story"><b>왜 ${esc(f.persona.label)}${josa(f.persona.label)} 되었나</b>${story.map(esc).join(' ')}</div>
+      ${f.lastLine ? `<div class="last">방금 한 말 — “${esc(V.swear ? f.lastLine.replace('{name}', '…') : censor(f.lastLine.replace('{name}', '…')))}”</div>` : ''}`;
+  }
+  function fishAt(x, y) {
+    for (let i = fishes.length - 1; i >= 0; i--) {
+      const f = fishes[i];
+      if (!f._s) continue;
+      if (Math.abs(x - f.x) < (f.w * f._s) / 2 * 0.85 && Math.abs(y - f.y) < (f.h * f._s) / 2 * 0.85) return f;
+    }
+    return null;
+  }
+  fishCv.addEventListener('pointermove', (e) => fishCv.classList.toggle('hot', !!fishAt(e.clientX, e.clientY)));
+  fishCv.addEventListener('click', (e) => {
+    const f = fishAt(e.clientX, e.clientY);
+    if (!f) { selected = null; card.classList.remove('open'); return; }
+    selected = f;
+    if (V.talk) say(f, 'poke');
+    renderCard();
+    card.classList.add('open');
+  });
 
   // ---------- animation ----------
   let last = performance.now();
@@ -526,6 +689,7 @@
       const tilt = Math.sin(f.heading) * 0.35 * Math.sign(Math.cos(f.heading) || 1);
       const wob = Math.sin(f.phase * 6 * Math.sqrt(V.fishSpeed)) * 0.025;
       const s = (Math.min(W, H) * 0.16 * f.baseLen * V.fishSize) / f.w;
+      f._s = s;
       const lift = (22 + f.depth * 60) * V.fishLift;
 
       if (V.fishLift > 0) {
@@ -545,7 +709,16 @@
       gctx.scale(s * f.facing, s);
       gctx.drawImage(f.body, -f.w / 2, -f.h / 2);
       gctx.restore();
+      if (f === selected) {
+        gctx.save();
+        gctx.strokeStyle = f.persona.color; gctx.globalAlpha = 0.7; gctx.lineWidth = 1.2; gctx.setLineDash([4, 5]);
+        gctx.beginPath(); gctx.ellipse(f.x, f.y, (f.w * s) / 2 + 10, (f.h * s) / 2 + 8, tilt, 0, Math.PI * 2); gctx.stroke();
+        gctx.restore();
+      }
     }
+    talkTick();
+    const tnow = clock();
+    for (const f of fishes) if (f.bubble) drawBubble(f, tnow);
     requestAnimationFrame(frame);
   }
 
@@ -577,6 +750,13 @@
         { key: 'brushLines', label: '붓으로 그릴 선 개수 (긴 선부터)', type: 'range', min: 5, max: 300, step: 5 },
         { key: 'wiggle', label: '손떨림', type: 'range', min: 0, max: 3, step: 0.05 },
       ]},
+      { name: '인성 · 말풍선', hint: '물고기를 누르면 그 물고기의 사연 카드가 열립니다.', items: [
+        { key: 'talk', label: '말풍선 보이기', type: 'check' },
+        { key: 'mood', label: '인성 분포', type: 'select', options: [['random', '완전 랜덤'], ['nice', '착한 물고기 많이'], ['mean', '나쁜 물고기 많이']] },
+        { key: 'swear', label: '욕 허용 (끄면 ### 처리)', type: 'check' },
+        { key: 'talkInterval', label: '한 마리가 말하는 간격 (초)', type: 'range', min: 5, max: 45, step: 1 },
+        { key: 'maxBubbles', label: '동시에 뜨는 말풍선 수', type: 'range', min: 1, max: 6, step: 1 },
+      ]},
       { name: '물고기', items: [
         { key: 'fishCount', label: '마리 수', type: 'range', min: 1, max: 30, step: 1 },
         { key: 'fishSize', label: '크기', type: 'range', min: 0.3, max: 2.5, step: 0.05 },
@@ -606,7 +786,11 @@
         persist(); scheduleField(); return;
       }
       if (key === 'seed') return;                     // applied with the button
-      if (['fishSize', 'fishSpeed', 'fishLift'].includes(key)) { persist(); return; }
+      if (['fishSize', 'fishSpeed', 'fishLift', 'talk', 'swear', 'talkInterval', 'maxBubbles'].includes(key)) { if (key === 'swear') renderCard(); persist(); return; }
+      if (key === 'mood') {
+        for (const f of fishes) { f.persona = pickPersona(V.mood, Math.random); f.profile = null; f.lastLine = ''; }
+        updateNames(); renderCard(); persist(); return;
+      }
       if (key === 'fishCount') { if (final) { syncFishCount(); persist(); } return; }
       const fishKeys = ['bodyOpacity', 'palette', 'wcLayers', 'lineMode', 'inkAlpha', 'brushName', 'brushWeight', 'brushLines'];
       const fieldKeys = ['rows', 'density', 'plantSize', 'variants', 'mist', 'bgWash', 'waterColor'];
