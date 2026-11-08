@@ -21,7 +21,7 @@ curl -sS --netrc-file "$NETRC" --list-only "ftp://$HOST/$REMOTE_DIR/" || { echo 
 FILES=$(git ls-files | grep -v -e '^deploy-dothome.sh$' -e '^README.md$' -e '^.gitignore$' -e '^.nojekyll$')
 COUNT=$(echo "$FILES" | wc -l | tr -d ' ')
 echo
-echo "위 폴더에 파일 $COUNT개를 올립니다. 같은 이름의 파일(예: 기존 index.html)은 덮어씁니다."
+echo "위 폴더에 파일 ${COUNT}개를 올립니다. 같은 이름의 파일(예: 기존 index.html)은 덮어씁니다."
 read -r -p "계속할까요? (y/N) " OK
 [ "$OK" = "y" ] || [ "$OK" = "Y" ] || { echo "취소했습니다."; exit 0; }
 
