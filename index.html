@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>山水 · 非花</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@300;500&family=Noto+Serif+TC:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root { --paper:#f2ead9; --ink:#2a2622; --muted:#7a6f62; --seal:#a8321e; --line:#d9cdb6; }
+  * { box-sizing:border-box; margin:0; }
+  body { background:var(--paper); color:var(--ink); font-family:"Noto Serif KR",serif; font-weight:300; line-height:1.7; }
+  header { max-width:1080px; margin:0 auto; padding:72px 20px 40px; display:flex; align-items:flex-end; gap:20px; }
+  h1 { font-family:"Noto Serif TC",serif; font-weight:500; font-size:clamp(40px,7vw,72px); letter-spacing:.15em; line-height:1; }
+  .seal { width:44px; height:44px; background:var(--seal); color:var(--paper); font-family:"Noto Serif TC",serif; display:grid; place-items:center; font-size:15px; line-height:1.05; text-align:center; border-radius:3px; flex-shrink:0; margin-bottom:6px; }
+  header p { color:var(--muted); font-size:15px; margin-left:auto; max-width:320px; }
+  main { max-width:1080px; margin:0 auto; padding:0 20px 60px; display:grid; grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); gap:28px; }
+  a.work { display:block; color:inherit; text-decoration:none; border-top:1px solid var(--ink); padding-top:18px; }
+  .thumb { aspect-ratio:4/3; overflow:hidden; background:#e7dcc6; border:1px solid var(--line); }
+  .thumb img { width:100%; height:100%; object-fit:cover; display:block; transition:transform .8s cubic-bezier(.2,.7,.2,1), filter .8s; filter:sepia(.15); }
+  a.work:hover .thumb img { transform:scale(1.04); filter:none; }
+  .meta { display:flex; justify-content:space-between; align-items:baseline; margin-top:16px; gap:12px; }
+  h2 { font-weight:500; font-size:22px; }
+  h2 small { font-family:"Noto Serif TC",serif; color:var(--muted); font-size:15px; margin-left:8px; font-weight:500; }
+  .go { color:var(--seal); font-size:14px; white-space:nowrap; }
+  .work p { color:var(--muted); font-size:14.5px; margin-top:6px; }
+  footer { max-width:1080px; margin:0 auto; padding:24px 20px 48px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
+  footer a { color:inherit; }
+  @media (max-width:640px){ header{flex-wrap:wrap; padding-top:48px;} header p{margin-left:0;} }
+</style>
+</head>
+<body>
+<header>
+  <h1>山水·非花</h1>
+  <div class="seal">林<br>東</div>
+  <p>수학 함수와 노이즈만으로 그려내는 절차적 동양화. 새로고침할 때마다 세상에 없던 그림이 태어납니다.</p>
+</header>
+
+<main>
+  <a class="work" href="shan-shui-inf/">
+    <div class="thumb"><img src="shan-shui-inf/screenshots/screen001.jpg" alt="Shan Shui Infinite 산수화 예시"></div>
+    <div class="meta"><h2>무한 산수 <small>{山, 水}*</small></h2><span class="go">펼쳐보기 →</span></div>
+    <p>끝없이 옆으로 이어지는 벡터(SVG) 산수 두루마리. 산·나무·누각을 노이즈로 직접 모델링합니다.</p>
+  </a>
+  <a class="work" href="nonflowers/">
+    <div class="thumb"><img src="nonflowers/screenshots/screen01.jpg" alt="Nonflowers 공필화 예시"></div>
+    <div class="meta"><h2>존재하지 않는 꽃 <small>非花</small></h2><span class="go">피워보기 →</span></div>
+    <p>공필화 기법을 흉내 낸, 실제로는 존재하지 않는 꽃 그림. 시드를 바꿔 원하는 만큼 생성하고 저장하세요.</p>
+  </a>
+  <a class="work" href="fish-garden/">
+    <div class="thumb"><img src="fishdraw/samples/000003.svg" alt="fishdraw 물고기 예시" style="object-fit:contain;background:#fffaf0"></div>
+    <div class="meta"><h2>꽃밭 위의 물고기 <small>魚遊花田</small></h2><span class="go">들어가기 →</span></div>
+    <p>존재하지 않는 꽃 한 종으로 꽃밭을 피우고, 그 위로 무작위 물고기 열 마리가 헤엄칩니다. 원본 먹선 또는 p5.brush 수채 화풍으로.</p>
+  </a>
+</main>
+
+<footer>
+  원작: Lingdong Huang —
+  <a href="https://github.com/LingDong-/shan-shui-inf/tree/9f754d2b2e73495db7883d4d4055a7b0903b0454">Shan Shui Infinite</a> ·
+  <a href="https://github.com/LingDong-/nonflowers/tree/03b653d220f16c6bed7ea9c7edc852f7e91846cb">Nonflowers</a> ·
+  <a href="https://github.com/LingDong-/fishdraw/tree/a514372de1d05b4aa32a9e35aadec9a5299689a2">fishdraw</a>.
+  모두 MIT License (© 2018/2021 Lingdong Huang) — 라이선스 전문은 각 폴더의 <a href="shan-shui-inf/LICENSE">LICENSE</a>, <a href="nonflowers/LICENSE">LICENSE</a>, <a href="fishdraw/LICENSE">LICENSE</a> 참조.
+  각 작품의 ⚙ 파라미터 패널은 이 사이트에서 덧붙인 것입니다.<br>
+  수채 화풍: <a href="https://github.com/acamposuribe/p5.brush/tree/f2ffc89d199df7b88ce6672d8d4ee7e0bb58f26e">p5.brush</a> 2.2.3 · Alejandro Campos Uribe · MIT (<a href="vendor/p5.brush/LICENSE.md">LICENSE</a>) —
+  <a href="https://tylerxhobbs.com/essays/2017/a-generative-approach-to-simulating-watercolor-paints">Tyler Hobbs의 수채 방식</a>,
+  <a href="https://github.com/rvanwijnen/spectral.js">Spectral.js</a> (Ronald van Wijnen · MIT) 색 혼합.
+  p5.brush의 단독 실행 빌드를 써서 <a href="https://github.com/processing/p5.js/tree/v2.2.3">p5.js</a> 본체(LGPL-2.1)는 포함하지 않았습니다.
+</footer>
+</body>
+</html>

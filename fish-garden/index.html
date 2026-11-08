@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>꽃밭 위의 물고기</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@300;500&display=swap" rel="stylesheet">
+<style>
+  :root { --paper:#f6f1df; --ink:#2a2622; --muted:#7a6f62; --seal:#a8321e; }
+  * { box-sizing:border-box; margin:0; }
+  html, body { height:100%; overflow:hidden; background:var(--paper); color:var(--ink); font-family:"Noto Serif KR",serif; }
+  canvas.full { position:fixed; inset:0; width:100vw; height:100vh; display:block; }
+  #field { z-index:0; }
+  #fish { z-index:1; }
+  #loader { position:fixed; inset:0; z-index:5; display:grid; place-items:center; background:var(--paper); transition:opacity 1.2s ease; }
+  #loader p { font-size:15px; color:var(--muted); letter-spacing:.08em; }
+  #loader.gone { opacity:0; pointer-events:none; }
+  .bar { position:fixed; left:16px; right:16px; bottom:16px; z-index:3; display:flex; justify-content:space-between; align-items:flex-end; gap:12px; pointer-events:none; }
+  .caption { background:rgba(246,241,223,.82); backdrop-filter:blur(4px); padding:10px 14px; border-left:2px solid var(--seal); font-size:13px; line-height:1.6; color:var(--muted); max-width:min(420px, 70vw); pointer-events:auto; }
+  .caption b { color:var(--ink); font-weight:500; }
+  #names { font-style:italic; font-size:12px; }
+  #status { font-size:12px; color:var(--seal); min-height:0; }
+  .btns { display:flex; gap:8px; pointer-events:auto; }
+  .btns button { font:inherit; font-size:13px; background:rgba(246,241,223,.9); border:1px solid var(--ink); color:var(--ink); padding:8px 14px; cursor:pointer; transition:background .2s, color .2s, transform .15s; }
+  .btns button:hover { background:var(--ink); color:var(--paper); }
+  .btns button:active { transform:scale(.97); }
+  a.home { position:fixed; top:16px; left:16px; z-index:3; font-size:13px; color:var(--muted); text-decoration:none; background:rgba(246,241,223,.8); padding:4px 10px; }
+  #summary { display:none; }
+  @media (max-width:560px){ .bar{flex-direction:column; align-items:stretch;} .caption{max-width:none;} .btns{justify-content:flex-end;} }
+</style>
+</head>
+<body>
+<div id="summary"></div>
+<canvas id="field" class="full"></canvas>
+<canvas id="fish" class="full"></canvas>
+<a class="home" href="../">← 山水·非花</a>
+<div id="loader"><p id="load-text">꽃 한 송이를 고르는 중…</p></div>
+<div class="bar">
+  <div class="caption">
+    <div><b>오늘의 꽃</b> · 시드 <span id="seed"></span></div>
+    <div id="names">물고기를 기다리는 중…</div>
+    <div id="status"></div>
+  </div>
+  <div class="btns">
+    <button id="new-fish">물고기 다시</button>
+    <button id="new-flower">새 꽃밭</button>
+  </div>
+</div>
+
+<!-- Nonflowers (MIT, Lingdong Huang 2018): genParams / woody / herbal / paper / Layer -->
+<script src="../nonflowers/main.js"></script>
+<!-- p5.brush 2.2.3 standalone build (MIT, Alejandro Campos Uribe): watercolor fills after Tyler Hobbs, spectral.js pigment mixing -->
+<script src="../vendor/p5.brush/dist/brush.js"></script>
+<script src="../shared/nonflowers-fast.js"></script>
+<script src="../shared/panel.js"></script>
+<script src="../shared/flower-params.js"></script>
+<script>
+(() => {
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const fieldCv = document.getElementById('field');
+  const fishCv = document.getElementById('fish');
+  const fctx = fieldCv.getContext('2d');
+  const gctx = fishCv.getContext('2d');
+  const loadText = document.getElementById('load-text');
+  const statusEl = document.getElementById('status');
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const hashStr = (s) => { let h = 2166136261; for (const c of String(s)) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) % 1e9; };
+  let W = innerWidth, H = innerHeight;
+
+  // ---------- parameters ----------
+  const DEFAULTS = {
+    seed: SEED, plantType: 'auto',
+    style: 'mix', rows: 6, density: 1, plantSize: 1, variants: 4, mist: 0.1,
+    fishCount: 10, fishSize: 1, fishSpeed: 1, fishLift: 1, bodyOpacity: 0.88,
+    palette: 'koi', wcOpacity: 110, wcBleed: 0.2, wcTexture: 0.5, wcBorder: 0.55, wcLayers: 2,
+    lineMode: 'ink', inkAlpha: 0.85, brushName: 'pen', brushWeight: 1, brushLines: 40, wiggle: 0.6,
+    bgWash: true, waterColor: '#a9c8c4',
+  };
+  const FKEYS = FLOWER_KEYS();
+  const V = readQuery(DEFAULTS);
+  const q0 = new URLSearchParams(location.search);
+  let overrides = {};
+  for (const k of FKEYS) if (q0.has(k) && isFinite(+q0.get(k))) overrides[k] = +q0.get(k);
+
+  const PALETTES = {
+    koi: [['#d9512c', '#2a2622'], ['#e8742a', '#b8321e'], ['#f1ede2', '#d9512c'], ['#c8321e', '#f1ede2']],
+    gold: [['#f2a33a', '#e0662a'], ['#e8762a', '#f5c451'], ['#f5c451', '#e8762a']],
+    indigo: [['#3d5f86', '#22344d'], ['#5b7fa3', '#2f4f7a'], ['#7a9bb5', '#3d5f86']],
+    ink: [['#6b645c', '#2f2b27'], ['#8a8278', '#4a4540'], ['#4a4540', '#2a2622']],
+    spring: [['#d97a8e', '#8fb36b'], ['#e8b84a', '#d97a8e'], ['#6aa3b8', '#e8b84a'], ['#8fb36b', '#6aa3b8']],
+  };
+
+  // ---------- flower species ----------
+  let PAR, isWoody, variants = [], paperTile, parVersion = 0;
+  function makeSpecies() {
+    document.getElementById('summary').innerHTML = '';
+    Math.seed(V.seed);
+    PAR = genParams();
+    const coin = Math.random() <= 0.5;
+    isWoody = V.plantType === 'auto' ? coin : V.plantType === 'woody';
+    applyFlowerValues(PAR, overrides);
+    parVersion++;
+    document.getElementById('seed').textContent = V.seed;
+  }
+
+  function renderPlant() {
+    const ctx = Layer.empty(1200);
+    if (isWoody) woody({ ctx, xof: 600, yof: 1180, PAR });
+    else herbal({ ctx, xof: 600, yof: 1180, PAR });
+    ctx.globalCompositeOperation = 'source-over';
+    const b = Layer.bound(ctx);
+    if (b.xmax <= b.xmin) return null;
+    const w = b.xmax - b.xmin + 1, h = b.ymax - b.ymin + 1;
+    const out = document.createElement('canvas'); out.width = w; out.height = h;
+    out.getContext('2d').drawImage(ctx.canvas, b.xmin, b.ymin, w, h, 0, 0, w, h);
+    return out;
+  }
+
+  let variantsKey = '';
+  async function ensureVariants(token, say) {
+    const key = parVersion + ':' + V.variants;
+    if (key === variantsKey && variants.length) return true;
+    variants = [];
+    Math.seed(V.seed + ':plants');
+    for (let i = 0; i < V.variants; i++) {
+      say(`꽃을 피우는 중… ${i + 1} / ${V.variants}`);
+      await wait(20);
+      if (token !== fieldToken) return false;
+      const v = renderPlant();
+      if (v) variants.push(v);
+    }
+    variantsKey = key;
+    return true;
+  }
+
+  // ---------- p5.brush helpers ----------
+  brush.scaleBrushes(1.3);
+  function brushTarget(cv) {
+    brush.load(cv);
+    brush.clear();
+    brush.push();
+    brush.translate(-cv.width / 2, -cv.height / 2);
+  }
+  function brushWater() {
+    brush.fillBleed(V.wcBleed);
+    brush.fillTexture(V.wcTexture, V.wcBorder);
+  }
+  function brushWiggle() { if (V.wiggle > 0) brush.wiggle(V.wiggle); else brush.noField(); }
+
+  // watercolor version of a plant, built from the same Nonflowers parameters
+  function wcPlantShapes(x, y, s, rnd, out) {
+    const stems = isWoody ? 2 + Math.floor(rnd() * 3) : Math.max(1, Math.min(5, Math.round(PAR.stemCount)));
+    const L0 = (isWoody ? 300 : PAR.stemLength) * s;
+    const t = rnd();
+    const petalCol = hsvHex(PAR.flowerColor.min[0] + (PAR.flowerColor.max[0] - PAR.flowerColor.min[0]) * t,
+      (PAR.flowerColor.min[1] + PAR.flowerColor.max[1]) / 2 + 0.15, Math.min(1, (PAR.flowerColor.min[2] + PAR.flowerColor.max[2]) / 2));
+    for (let k = 0; k < stems; k++) {
+      const lean = (rnd() - 0.5) * (isWoody ? 1.6 : 0.9);
+      const L = L0 * (0.65 + rnd() * 0.45);
+      const bend = (PAR.stemBend || 6) * 0.02 * (rnd() < 0.5 ? -1 : 1);
+      const pts = [];
+      let px = x + (rnd() - 0.5) * 10 * s, py = y, ang = -Math.PI / 2 + lean * 0.4;
+      const N = 7;
+      for (let i = 0; i <= N; i++) {
+        pts.push([px, py]);
+        ang += bend + lean * 0.06;
+        px += Math.cos(ang) * L / N; py += Math.sin(ang) * L / N;
+      }
+      out.stems.push({ pts, w: Math.max(0.4, (isWoody ? PAR.branchWidth * 4 : PAR.stemWidth) * s * 0.35) });
+      // leaves along the stem
+      const nLeaf = Math.max(1, Math.min(3, Math.round((PAR.leafChance || 0.05) * 30 * (0.6 + rnd() * 0.8))));
+      for (let j = 0; j < nLeaf; j++) {
+        const i = 1 + Math.floor(rnd() * (N - 2));
+        const [lx, ly] = pts[i], [nx, ny] = pts[i + 1];
+        const sa = Math.atan2(ny - ly, nx - lx) + (rnd() < 0.5 ? -1 : 1) * (0.6 + rnd() * 0.6);
+        out.leaves.push(leafPoly(lx, ly, sa, PAR.leafLength * s * 0.9 * (0.7 + rnd() * 0.5), PAR.leafWidth * s * 0.45, rnd));
+      }
+      // flower head at the tip (and on a few joints for woody plants)
+      const heads = [pts[N]];
+      if (isWoody || rnd() < PAR.flowerChance * 8) heads.push(pts[N - 2 - Math.floor(rnd() * 2)]);
+      for (const [hx, hy] of heads) {
+        const n = Math.max(2, Math.round(PAR.flowerPetal));
+        const pl = Math.max(4, PAR.flowerLength * s * 1.3), pw = Math.max(2, PAR.flowerWidth * s * 0.55);
+        const rot = rnd() * Math.PI * 2;
+        out.petals.push({ col: petalCol, poly: flowerPoly(hx, hy, n, pl, pw, rot) });   // whole rosette = one fill
+        out.centers.push([hx, hy, Math.max(1.5, (PAR.innerWidth || 2) * s * 0.9 + 2 * s)]);
+      }
+    }
+  }
+  function flowerPoly(x, y, n, pl, pw, rot) {
+    const k = Math.max(0.5, Math.min(5, (pl / pw) * 0.6)), pts = [], M = Math.max(24, n * 10);
+    for (let i = 0; i < M; i++) {
+      const a = (i / M) * Math.PI * 2;
+      const r = pl * (0.18 + 0.82 * Math.pow(Math.abs(Math.cos((n * a) / 2)), k));
+      pts.push([x + Math.cos(a + rot) * r, y + Math.sin(a + rot) * r * 0.75]);
+    }
+    return pts;
+  }
+  function leafPoly(x, y, a, len, wid, rnd) {
+    const ca = Math.cos(a), sa = Math.sin(a), left = [], right = [];
+    const M = 6, pw = 0.6 + rnd() * 0.5;
+    for (let i = 0; i <= M; i++) {
+      const u = i / M, w = Math.pow(Math.sin(Math.PI * u), pw) * wid;
+      const ax = x + ca * len * u, ay = y + sa * len * u;
+      left.push([ax - sa * w, ay + ca * w]); right.push([ax + sa * w, ay - ca * w]);
+    }
+    return left.concat(right.reverse());
+  }
+
+  // ---------- field ----------
+  // p5.brush has one global drawing target, so every brush job runs one at a time
+  let brushChain = Promise.resolve();
+  const withBrush = (fn) => { const p = brushChain.then(fn, fn); brushChain = p.catch(() => {}); return p; };
+  let fieldToken = 0;
+  function requestField() { const token = ++fieldToken; return withBrush(() => layoutField(token)); }
+  async function layoutField(token) {
+    if (token !== fieldToken) return;
+    W = innerWidth; H = innerHeight;
+    const say = (m) => { loadText.textContent = m; statusEl.textContent = m; };
+    if (!paperTile) paperTile = paper({ col: [1, 0.985, 0.9], tex: 10, spr: 0.4 });
+
+    if (V.style !== 'water') { if (!(await ensureVariants(token, say))) return; }
+
+    // paint into an offscreen canvas first so the old field stays visible meanwhile
+    const off = document.createElement('canvas'); off.width = W * DPR; off.height = H * DPR;
+    const o = off.getContext('2d');
+    o.setTransform(DPR, 0, 0, DPR, 0, 0);
+    o.fillStyle = o.createPattern(paperTile, 'repeat');
+    o.fillRect(0, 0, W, H);
+
+    const water = V.style !== 'ink';
+    let wc = null;
+    if (water) {
+      wc = document.createElement('canvas'); wc.width = W; wc.height = H;
+      brush.seed(hashStr(V.seed)); brush.noiseSeed(hashStr(V.seed) + 7);
+      brushTarget(wc);
+      if (V.bgWash) {
+        say('물빛을 칠하는 중…');
+        brush.noStroke(); brushWater();
+        brush.fill(V.waterColor, Math.min(255, V.wcOpacity * 0.55));
+        const band = (y0, y1, amp) => {
+          const pts = [];
+          for (let i = 0; i <= 12; i++) pts.push([-40 + (W + 80) * i / 12, y0 + Math.sin(i * 1.3 + y0) * amp]);
+          for (let i = 12; i >= 0; i--) pts.push([-40 + (W + 80) * i / 12, y1 + Math.sin(i * 0.9 + y1) * amp]);
+          brush.polygon(pts);
+        };
+        band(-30, H * 0.38, 18); band(H * 0.18, H * 0.62, 24); band(H * 0.55, H + 40, 16);
+        brush.noFill();
+      }
+    }
+
+    let s = 7;
+    const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+    const ROWS = Math.round(V.rows);
+
+    if (V.style === 'water') {
+      // whole field painted with p5.brush
+      for (let r = 0; r < ROWS; r++) {
+        const t = ROWS > 1 ? r / (ROWS - 1) : 1;
+        const baseY = H * (0.3 + 0.78 * t);
+        const sc = (H / 900) * (0.45 + 0.75 * t) * V.plantSize;
+        const step = Math.max(40, 150 * sc / V.density);
+        const shapes = { stems: [], leaves: [], petals: [], centers: [] };
+        for (let x = -step * 0.5 + rnd() * step; x < W + step * 0.5; x += step * (0.6 + rnd() * 0.8)) {
+          wcPlantShapes(x, baseY + (rnd() - 0.5) * H * 0.05, sc * (0.8 + rnd() * 0.4), rnd, shapes);
+        }
+        say(`수채로 꽃밭을 칠하는 중… ${r + 1} / ${ROWS}`);
+        await wait(10);
+        if (token !== fieldToken) { brush.pop(); return; }
+        const fade = 0.55 + 0.45 * t;
+        const stemHex = isWoody ? hsvHex(PAR.branchColor.min[0], PAR.branchColor.min[1] + 0.15, PAR.branchColor.min[2] * 0.6)
+          : hsvHex(PAR.leafColor.min[0], PAR.leafColor.min[1] + 0.1, PAR.leafColor.min[2] * 0.8);
+        brushWiggle();
+        brush.noFill();
+        for (const st of shapes.stems) { brush.set('cpencil', stemHex, st.w * V.brushWeight); brush.spline(st.pts, 0.6); }
+        brush.noField(); brush.noStroke(); brushWater();
+        const far = t < 0.45;                          // far rows use quick flat washes (≈1000× faster)
+        const paint = (col, op) => { if (far) { brush.noFill(); brush.wash(col, op * 0.55); } else { brush.noWash(); brush.fill(col, op); } };
+        const leafA = hsvHex(PAR.leafColor.min[0], PAR.leafColor.min[1] + 0.15, PAR.leafColor.min[2]);
+        const leafB = hsvHex(PAR.leafColor.max[0], PAR.leafColor.max[1] + 0.15, PAR.leafColor.max[2]);
+        paint(leafA, V.wcOpacity * fade);
+        shapes.leaves.forEach((p, i) => { if (i % 2 === 0) brush.polygon(p); });
+        paint(leafB, V.wcOpacity * fade);
+        shapes.leaves.forEach((p, i) => { if (i % 2 === 1) brush.polygon(p); });
+        const byCol = {};
+        for (const p of shapes.petals) (byCol[p.col] = byCol[p.col] || []).push(p.poly);
+        for (const c in byCol) { paint(c, Math.min(255, V.wcOpacity * 1.1 * fade)); byCol[c].forEach((p) => brush.polygon(p)); }
+        brush.noFill(); brush.wash(hsvHex(PAR.innerColor.min[0], PAR.innerColor.min[1] + 0.2, PAR.innerColor.min[2]), Math.min(255, V.wcOpacity * 1.3));
+        for (const [cx, cy, cr] of shapes.centers) brush.circle(cx, cy, cr, 0.4);
+        brush.noWash(); brush.noFill();
+        // mist between rows
+        if (V.mist > 0 && r < ROWS - 1) { brush.wash('#f6f1df', 255 * V.mist * (1 - t)); brush.rect(0, 0, W, H); brush.noWash(); }
+      }
+      brush.pop(); brush.render();
+      o.globalCompositeOperation = 'multiply'; o.drawImage(wc, 0, 0, W, H); o.globalCompositeOperation = 'source-over';
+    } else {
+      if (water) { brush.pop(); brush.render(); o.globalCompositeOperation = 'multiply'; o.drawImage(wc, 0, 0, W, H); o.globalCompositeOperation = 'source-over'; }
+      const maxH = Math.max(...variants.map((v) => v.height));
+      for (let r = 0; r < ROWS; r++) {
+        const t = ROWS > 1 ? r / (ROWS - 1) : 1;
+        const baseY = H * (0.3 + 0.78 * t);
+        const plantH = H * (0.22 + 0.42 * t) * V.plantSize;
+        const scale = plantH / maxH;
+        const avgW = variants.reduce((a, v) => a + v.width, 0) / variants.length * scale;
+        const step = Math.max(avgW * 0.42 / V.density, 14);
+        o.globalAlpha = 0.45 + 0.55 * t;
+        if (water) o.globalCompositeOperation = 'multiply';
+        for (let x = -avgW * 0.5 + rnd() * step; x < W + avgW * 0.5; x += step * (0.6 + rnd() * 0.8)) {
+          const v = variants[Math.floor(rnd() * variants.length)];
+          const sc = scale * (0.8 + rnd() * 0.4);
+          const w = v.width * sc, h = v.height * sc;
+          const y = baseY + (rnd() - 0.5) * H * 0.05;
+          o.save(); o.translate(x, y);
+          if (rnd() < 0.5) o.scale(-1, 1);
+          o.drawImage(v, -w / 2, -h, w, h);
+          o.restore();
+        }
+        o.globalCompositeOperation = 'source-over';
+        o.globalAlpha = V.mist * (1 - t);
+        o.fillStyle = '#f6f1df';
+        if (r < ROWS - 1) o.fillRect(0, 0, W, H);
+      }
+      o.globalAlpha = 1;
+    }
+    if (token !== fieldToken) return;
+    for (const cv of [fieldCv, fishCv]) { cv.width = W * DPR; cv.height = H * DPR; }
+    fctx.setTransform(1, 0, 0, 1, 0, 0);
+    fctx.drawImage(off, 0, 0);
+    gctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    say('');
+  }
+
+  // ---------- fish ----------
+  const worker = new Worker('fish-worker.js');
+  let fishes = [];
+  let generation = 0, fishSeq = 0;
+
+  function fishSprite(lines, colors) {
+    const S = 1.2;
+    let xmin = 1e9, xmax = -1e9, ymin = 1e9, ymax = -1e9;
+    for (const pl of lines) for (const [x, y] of pl) {
+      xmin = Math.min(xmin, x); xmax = Math.max(xmax, x); ymin = Math.min(ymin, y); ymax = Math.max(ymax, y);
+    }
+    const pad = 10;
+    const w = Math.ceil((xmax - xmin) * S) + pad * 2, h = Math.ceil((ymax - ymin) * S) + pad * 2;
+    const T = ([x, y]) => [(x - xmin) * S + pad, (y - ymin) * S + pad];
+
+    const ink = document.createElement('canvas'); ink.width = w; ink.height = h;
+    const ic = ink.getContext('2d');
+    ic.strokeStyle = '#2a2622'; ic.lineWidth = 1.1; ic.lineCap = ic.lineJoin = 'round';
+    ic.beginPath();
+    for (const pl of lines) pl.forEach((p, i) => { const [px, py] = T(p); i ? ic.lineTo(px, py) : ic.moveTo(px, py); });
+    ic.stroke();
+
+    // silhouette: fill between outermost ink pixels per row ∩ per column
+    const data = ic.getImageData(0, 0, w, h).data;
+    const on = (x, y) => data[(y * w + x) * 4 + 3] > 20;
+    const rowL = new Int32Array(h).fill(-1), rowR = new Int32Array(h).fill(-1);
+    const colT = new Int32Array(w).fill(-1), colB = new Int32Array(w).fill(-1);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (on(x, y)) {
+      if (rowL[y] < 0) rowL[y] = x; rowR[y] = x;
+      if (colT[x] < 0) colT[x] = y; colB[x] = y;
+    }
+    const mask = document.createElement('canvas'); mask.width = w; mask.height = h;
+    const mc = mask.getContext('2d');
+    const img = mc.createImageData(w, h);
+    const fL = new Int32Array(h).fill(-1), fR = new Int32Array(h).fill(-1);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (rowL[y] >= 0 && x >= rowL[y] && x <= rowR[y] && colT[x] >= 0 && y >= colT[x] && y <= colB[x]) {
+        const i = (y * w + x) * 4;
+        img.data[i] = 248; img.data[i + 1] = 243; img.data[i + 2] = 226; img.data[i + 3] = 255;
+        if (fL[y] < 0) fL[y] = x; fR[y] = x;
+      }
+    }
+    mc.putImageData(img, 0, 0);
+
+    const shadow = document.createElement('canvas'); shadow.width = w; shadow.height = h;
+    const sc = shadow.getContext('2d');
+    sc.drawImage(mask, 0, 0);
+    sc.globalCompositeOperation = 'source-in';
+    sc.fillStyle = '#3b3020'; sc.fillRect(0, 0, w, h);
+
+    const body = document.createElement('canvas'); body.width = w; body.height = h;
+    const bc = body.getContext('2d');
+    bc.globalAlpha = V.bodyOpacity;
+    bc.drawImage(mask, 0, 0);
+    bc.globalAlpha = 1;
+
+    const water = V.style !== 'ink';
+    const brushLines = water && (V.lineMode === 'brush' || V.lineMode === 'both');
+    if (water) {
+      // silhouette polygon traced from the filled rows
+      const rows = []; for (let y = 0; y < h; y++) if (fL[y] >= 0) rows.push(y);
+      const right = [], left = [];
+      for (let k = 0; k < rows.length; k += 3) { const y = rows[k]; right.push([fR[y], y]); left.push([fL[y], y]); }
+      const sil = right.concat(left.reverse());
+      const top = rows[0] || 0, bot = rows[rows.length - 1] || h, mid = top + (bot - top) * 0.45;
+      const backR = [], backL = [];
+      for (let k = 0; k < rows.length && rows[k] <= mid; k += 3) {
+        const y = rows[k], cx = (fL[y] + fR[y]) / 2, hw = (fR[y] - fL[y]) / 2 * 0.86;
+        backR.push([cx + hw, y]); backL.push([cx - hw, y]);
+      }
+      const back = backR.concat(backL.reverse());
+
+      const wc = document.createElement('canvas'); wc.width = w; wc.height = h;
+      brushTarget(wc);
+      brush.noStroke(); brushWater();
+      for (let l = 0; l < V.wcLayers; l++) {
+        brush.fill(colors[0], V.wcOpacity / Math.max(1, l * 0.8 + 1));
+        if (sil.length > 3) brush.polygon(sil);
+      }
+      brush.fill(colors[1], V.wcOpacity * 0.6);
+      if (back.length > 3) brush.polygon(back);
+      brush.noFill();
+      if (brushLines) {
+        brushWiggle();
+        const ranked = lines.map((pl) => {
+          let len = 0; for (let i = 1; i < pl.length; i++) len += Math.hypot(pl[i][0] - pl[i - 1][0], pl[i][1] - pl[i - 1][1]);
+          return [len, pl];
+        }).sort((a, b) => b[0] - a[0]).slice(0, Math.round(V.brushLines));
+        brush.set(V.brushName, '#2a2622', V.brushWeight);
+        for (const [, pl] of ranked) {
+          const pts = pl.filter((_, i) => i % 2 === 0 || i === pl.length - 1).map(T);
+          if (pts.length > 1) brush.spline(pts, 0.3);
+        }
+        brush.noStroke(); brush.noField();
+      }
+      brush.pop(); brush.render();
+      // p5.brush leaves white paper where it worked: multiply it in, then trim to a softened silhouette
+      bc.globalCompositeOperation = 'multiply';
+      bc.drawImage(wc, 0, 0);
+      bc.globalCompositeOperation = 'destination-in';
+      bc.filter = 'blur(1.5px)';
+      bc.drawImage(mask, 0, 0);
+      bc.filter = 'none';
+      bc.globalCompositeOperation = 'source-over';
+    }
+    if (!water || V.lineMode !== 'brush') {
+      bc.globalAlpha = water ? V.inkAlpha : 1;
+      bc.drawImage(ink, 0, 0);
+      bc.globalAlpha = 1;
+    }
+    return { body, shadow, w, h };
+  }
+
+  function pickColors(rnd) {
+    if (V.palette === 'random') {
+      const h = rnd() * 360;
+      return [hsvHex(h, 0.45 + rnd() * 0.4, 0.65 + rnd() * 0.3), hsvHex(h + 30 + rnd() * 60, 0.5, 0.45)];
+    }
+    const pal = PALETTES[V.palette] || PALETTES.koi;
+    return pal[Math.floor(rnd() * pal.length)];
+  }
+
+  function spawnFish(data) {
+    const rnd = Math.random;
+    const colors = pickColors(rnd);
+    const sp = fishSprite(data.lines, colors);
+    const depth = rnd();
+    const speed = 18 + rnd() * 30;
+    const dir = rnd() < 0.5 ? -1 : 1;
+    return {
+      ...sp, lines: data.lines, colors, paletteUsed: V.palette, name: data.name, depth, baseLen: 0.6 + depth * 0.9,
+      x: rnd() * W, y: H * (0.1 + rnd() * 0.75),
+      heading: (dir < 0 ? Math.PI : 0) + (rnd() - 0.5) * 0.6,
+      speed, phase: rnd() * 10, turn: 0, facing: dir, alpha: 0,
+    };
+  }
+
+  function updateNames() {
+    document.getElementById('names').textContent =
+      fishes.length ? `물고기 ${fishes.length}마리 — ` + fishes.map((f) => f.name).join(', ') : '물고기가 헤엄쳐 오는 중…';
+  }
+  worker.onmessage = (e) => {
+    if (e.data.gen !== generation) return;
+    withBrush(() => {
+      if (e.data.gen !== generation || fishes.length >= V.fishCount) return;
+      fishes.push(spawnFish(e.data));
+      fishes.sort((a, b) => a.depth - b.depth);
+      updateNames();
+    });
+  };
+  function requestFish(n) { for (let i = 0; i < n; i++) worker.postMessage({ id: ++fishSeq, gen: generation }); }
+  function newFish() { generation++; fishes = []; updateNames(); requestFish(V.fishCount); }
+  function syncFishCount() {
+    if (fishes.length > V.fishCount) { fishes.length = V.fishCount; updateNames(); }
+    else if (fishes.length < V.fishCount) requestFish(V.fishCount - fishes.length);
+  }
+  const resprite = () => withBrush(_resprite);
+  async function _resprite() {
+    statusEl.textContent = '물고기를 다시 그리는 중…';
+    await wait(20);
+    for (const f of fishes) {
+      if (V.palette !== f.paletteUsed) { f.colors = pickColors(Math.random); f.paletteUsed = V.palette; }
+      Object.assign(f, fishSprite(f.lines, f.colors));
+      await wait(0);
+    }
+    statusEl.textContent = '';
+  }
+
+  // ---------- animation ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min((now - last) / 1000, 0.05);
+    last = now;
+    gctx.clearRect(0, 0, W, H);
+    const margin = 80;
+    for (const f of fishes) {
+      f.phase += dt;
+      f.alpha = Math.min(1, f.alpha + dt * 0.8);
+      f.turn += (Math.random() - 0.5) * dt * 1.2;
+      f.turn *= 0.98;
+      let steer = 0;
+      const desired = Math.atan2(H * 0.5 - f.y, W * 0.5 - f.x);
+      if (f.x < margin || f.x > W - margin || f.y < margin * 0.6 || f.y > H - margin * 1.6) {
+        let d = desired - f.heading; d = Math.atan2(Math.sin(d), Math.cos(d)); steer = d * 0.9;
+      }
+      f.heading += (f.turn + steer) * dt;
+      const v = f.speed * V.fishSpeed * (0.85 + 0.15 * Math.sin(f.phase * 1.7));
+      f.x += Math.cos(f.heading) * v * dt;
+      f.y += Math.sin(f.heading) * v * dt * 0.6;
+
+      // fishdraw fish face left; flip smoothly when swimming right
+      const target = Math.cos(f.heading) < 0 ? 1 : -1;
+      f.facing += (target - f.facing) * Math.min(1, dt * 3);
+      const tilt = Math.sin(f.heading) * 0.35 * Math.sign(Math.cos(f.heading) || 1);
+      const wob = Math.sin(f.phase * 6 * Math.sqrt(V.fishSpeed)) * 0.025;
+      const s = (Math.min(W, H) * 0.16 * f.baseLen * V.fishSize) / f.w;
+      const lift = (22 + f.depth * 60) * V.fishLift;
+
+      if (V.fishLift > 0) {
+        gctx.save();
+        gctx.globalAlpha = f.alpha * (0.22 - f.depth * 0.1);
+        gctx.filter = `blur(${3 + f.depth * 5}px)`;
+        gctx.translate(f.x + lift * 0.3, f.y + lift);
+        gctx.rotate(tilt);
+        gctx.scale(s * f.facing, s * 0.9);
+        gctx.drawImage(f.shadow, -f.w / 2, -f.h / 2);
+        gctx.restore();
+      }
+      gctx.save();
+      gctx.globalAlpha = f.alpha;
+      gctx.translate(f.x, f.y);
+      gctx.rotate(tilt + wob);
+      gctx.scale(s * f.facing, s);
+      gctx.drawImage(f.body, -f.w / 2, -f.h / 2);
+      gctx.restore();
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // ---------- panel ----------
+  makeSpecies();
+  const fv = flowerValuesFromPAR(PAR);
+  const isWater = (v) => v.style !== 'ink';
+  const panel = makePanel({
+    title: '꽃밭 위의 물고기 · 파라미터',
+    values: Object.assign({}, V, fv),
+    groups: [
+      { name: '화풍', items: [
+        { key: 'style', label: '그리는 방식', type: 'select', options: [['ink', '원본 (먹선 + 공필)'], ['mix', '혼합 (원본 꽃 + 수채 물고기)'], ['water', '수채 (전부 p5.brush)']] },
+      ]},
+      { name: '수채 물감 (p5.brush)', when: isWater, hint: 'Tyler Hobbs의 수채 방식 — 다각형을 여러 겹 변형해 쌓아 번짐을 만듭니다.', items: [
+        { key: 'wcOpacity', label: '물감 농도', type: 'range', min: 10, max: 255, step: 1 },
+        { key: 'wcBleed', label: '번짐', type: 'range', min: 0, max: 0.6, step: 0.01 },
+        { key: 'wcTexture', label: '종이 질감', type: 'range', min: 0, max: 1, step: 0.01 },
+        { key: 'wcBorder', label: '가장자리 진하기', type: 'range', min: 0, max: 1, step: 0.01 },
+        { key: 'wcLayers', label: '물고기 덧칠 횟수', type: 'range', min: 1, max: 4, step: 1 },
+        { key: 'bgWash', label: '배경 물빛 칠하기', type: 'check' },
+        { key: 'waterColor', label: '물빛 색', type: 'color' },
+      ]},
+      { name: '선 (물고기)', when: isWater, items: [
+        { key: 'lineMode', label: '선 방식', type: 'select', options: [['ink', '원본 펜선'], ['brush', '붓선만'], ['both', '펜선 + 붓선']] },
+        { key: 'inkAlpha', label: '펜선 진하기', type: 'range', min: 0, max: 1, step: 0.01 },
+        { key: 'brushName', label: '붓 종류', type: 'select', options: [['pen', 'pen (펜)'], ['rotring', 'rotring (제도펜)'], ['HB', 'HB 연필'], ['2B', '2B 연필'], ['cpencil', '색연필'], ['charcoal', '목탄'], ['marker', '마커'], ['crayon', '크레용'], ['pastel', '파스텔']] },
+        { key: 'brushWeight', label: '붓 굵기', type: 'range', min: 0.2, max: 3, step: 0.05 },
+        { key: 'brushLines', label: '붓으로 그릴 선 개수 (긴 선부터)', type: 'range', min: 5, max: 300, step: 5 },
+        { key: 'wiggle', label: '손떨림', type: 'range', min: 0, max: 3, step: 0.05 },
+      ]},
+      { name: '물고기', items: [
+        { key: 'fishCount', label: '마리 수', type: 'range', min: 1, max: 30, step: 1 },
+        { key: 'fishSize', label: '크기', type: 'range', min: 0.3, max: 2.5, step: 0.05 },
+        { key: 'fishSpeed', label: '헤엄 속도', type: 'range', min: 0, max: 4, step: 0.05 },
+        { key: 'fishLift', label: '떠 있는 높이 (그림자)', type: 'range', min: 0, max: 3, step: 0.05 },
+        { key: 'bodyOpacity', label: '몸통 불투명도', type: 'range', min: 0, max: 1, step: 0.01 },
+        { key: 'palette', label: '물고기 색 (수채)', type: 'select', options: [['koi', '비단잉어'], ['gold', '금붕어'], ['indigo', '쪽빛'], ['ink', '먹'], ['spring', '봄빛'], ['random', '무작위']] },
+      ]},
+      { name: '꽃밭 배치', items: [
+        { key: 'rows', label: '줄 수', type: 'range', min: 1, max: 12, step: 1 },
+        { key: 'density', label: '빽빽함', type: 'range', min: 0.3, max: 2.5, step: 0.05 },
+        { key: 'plantSize', label: '꽃 크기', type: 'range', min: 0.3, max: 2, step: 0.05 },
+        { key: 'variants', label: '같은 종 다른 모양 수 (원본/혼합)', type: 'range', min: 1, max: 8, step: 1 },
+        { key: 'mist', label: '안개 (원근감)', type: 'range', min: 0, max: 0.4, step: 0.01 },
+      ]},
+      { name: '꽃 종 (Nonflowers 파라미터)', hint: '시드가 정한 꽃의 숫자 값들입니다. 바꾸면 같은 종을 다시 그립니다.', items: [
+        { key: 'seed', label: '시드', type: 'text' },
+        { key: 'plantType', label: '형태', type: 'select', options: [['auto', '시드대로'], ['herbal', '초본 (풀꽃)'], ['woody', '목본 (나무꽃)']] },
+      ]},
+      ...FLOWER_GROUPS.map((g) => ({ name: '꽃 종 · ' + g.name, items: g.items })),
+    ],
+    onChange(key, val, all, final) {
+      V[key] = val;
+      if (FKEYS.includes(key)) {
+        if (!final) return;
+        overrides[key] = val; applyFlowerValues(PAR, { [key]: val }); parVersion++;
+        persist(); scheduleField(); return;
+      }
+      if (key === 'seed') return;                     // applied with the button
+      if (['fishSize', 'fishSpeed', 'fishLift'].includes(key)) { persist(); return; }
+      if (key === 'fishCount') { if (final) { syncFishCount(); persist(); } return; }
+      const fishKeys = ['bodyOpacity', 'palette', 'wcLayers', 'lineMode', 'inkAlpha', 'brushName', 'brushWeight', 'brushLines'];
+      const fieldKeys = ['rows', 'density', 'plantSize', 'variants', 'mist', 'bgWash', 'waterColor'];
+      const both = ['wcOpacity', 'wcBleed', 'wcTexture', 'wcBorder', 'wiggle'];
+      if (!final && !['palette', 'lineMode', 'brushName', 'bgWash', 'waterColor', 'plantType', 'style'].includes(key)) return;
+      persist();
+      if (key === 'plantType') { makeSpecies(); panel.setAll(flowerValuesFromPAR(PAR)); scheduleField(); return; }
+      if (key === 'style') { scheduleField(); resprite(); return; }
+      if (fishKeys.includes(key)) resprite();
+      if (fieldKeys.includes(key)) scheduleField();
+      if (both.includes(key)) { scheduleField(); resprite(); }
+    },
+    actions: [
+      { label: '이 시드로 꽃 바꾸기', primary: true, onClick: () => applySeed(String(panel.values.seed || Date.now())) },
+      { label: '무작위 새 꽃', onClick: () => applySeed(String(Date.now())) },
+      { label: '물고기 다시', onClick: () => newFish() },
+      { label: '기본값으로', onClick: () => { location.href = location.pathname + '?seed=' + encodeURIComponent(V.seed); } },
+    ],
+    credit: '꽃: <a href="https://github.com/LingDong-/nonflowers">Nonflowers</a> · 물고기: <a href="https://github.com/LingDong-/fishdraw">fishdraw</a> (Lingdong Huang, MIT)<br>수채: <a href="https://github.com/acamposuribe/p5.brush">p5.brush</a> 2.2.3 (Alejandro Campos Uribe, MIT) — <a href="https://tylerxhobbs.com/essays/2017/a-generative-approach-to-simulating-watercolor-paints">Tyler Hobbs 수채 방식</a>, <a href="https://github.com/rvanwijnen/spectral.js">spectral.js</a> 색 혼합',
+  });
+
+  function persist() {
+    const out = {};
+    for (const k in DEFAULTS) out[k] = V[k];
+    writeQuery(out, DEFAULTS);
+    const q = new URLSearchParams(location.search);
+    for (const k of FKEYS) { if (k in overrides) q.set(k, overrides[k]); else q.delete(k); }
+    history.replaceState(null, '', location.pathname + '?' + q.toString());
+  }
+  function applySeed(seed) {
+    V.seed = seed; overrides = {}; panel.set('seed', seed);
+    makeSpecies(); panel.setAll(flowerValuesFromPAR(PAR));
+    persist(); scheduleField();
+  }
+  let ft;
+  function scheduleField() {
+    clearTimeout(ft);
+    ft = setTimeout(async () => { panel.busy('꽃밭을 다시 그리는 중…'); await requestField(); panel.busy(''); }, 250);
+  }
+
+  // ---------- controls ----------
+  document.getElementById('new-fish').onclick = newFish;
+  document.getElementById('new-flower').onclick = () => applySeed(String(Date.now()));
+  let rt;
+  addEventListener('resize', () => {
+    clearTimeout(rt);
+    rt = setTimeout(() => {
+      requestField();
+      for (const f of fishes) { f.x = Math.min(f.x, innerWidth - 40); f.y = Math.min(f.y, innerHeight - 80); }
+    }, 300);
+  });
+
+  (async () => {
+    newFish();
+    await wait(50);
+    await requestField();
+    document.getElementById('loader').classList.add('gone');
+    requestAnimationFrame(frame);
+  })();
+})();
+</script>
+</body>
+</html>
