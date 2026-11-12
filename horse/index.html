@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>선으로 그린 말 · 線馬</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@300;500&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body { background: #f6f1df; color: #2a2622; font-family: "Noto Serif KR", serif; font-weight: 300; overflow: hidden; }
+  a.back { position: fixed; top: 14px; left: 14px; z-index: 5; font-size: 13px; color: #2a2622; text-decoration: none; border-bottom: 1px solid #2a2622; }
+  #stage { position: fixed; inset: 0; display: grid; gap: 0; place-items: center; cursor: pointer; padding: 44px 12px 40px; }
+  #stage svg { width: 100%; height: 100%; display: block; }
+  #cap { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; font-size: 12.5px; color: #7a6f62; pointer-events: none; }
+  .hd { stroke-dasharray: 1; stroke-dashoffset: 1; animation: hd .5s ease-out forwards; }
+  @keyframes hd { to { stroke-dashoffset: 0; } }
+  @media (prefers-reduced-motion: reduce) { .hd { animation: none; stroke-dashoffset: 0; } }
+</style>
+</head>
+<body>
+<a class="back" href="../">← 山水·非花</a>
+<div id="stage" title="클릭하면 새 말"></div>
+<div id="cap"></div>
+<script src="../shared/panel.js"></script>
+<script src="horsedraw.js"></script>
+<script>
+(function () {
+  const DEFAULTS = { seed: '', build: 'auto', pose: 'auto', coat: 'auto', mane: -1, wobble: 1, stroke: 1.3, count: 1, animate: true, ink: '#1d1a17', paper: '#f6f1df' };
+  const V = readQuery(DEFAULTS);
+  if (!V.seed) V.seed = String(Math.floor(Math.random() * 1e6));
+  const stage = document.getElementById('stage'), cap = document.getElementById('cap');
+  const KO = { light: '경주마', stock: '보통 말', draft: '짐말', pony: '조랑말', foal: '망아지',
+               stand: '서 있음', walk: '걷기', trot: '속보', gallop: '질주', rear: '앞발 들기', graze: '풀 뜯기',
+               plain: '민무늬', shade: '음영', pinto: '얼룩', dapple: '연전', zebra: '줄무늬' };
+  let last = [];
+
+  function render() {
+    const n = +V.count, cols = n === 1 ? 1 : n <= 4 ? 2 : 3;
+    stage.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+    document.body.style.background = V.paper;
+    last = []; let html = '';
+    for (let i = 0; i < n; i++) {
+      const res = horsedraw({ seed: V.seed + (i ? '-' + i : ''), build: V.build, pose: V.pose, coat: V.coat, mane: V.mane < 0 ? null : V.mane, wobble: V.wobble });
+      last.push(res);
+      html += horsedraw.toSVG(res, { ink: V.ink, paper: '', stroke: V.stroke, animate: V.animate ? 1.6 : 0 });
+    }
+    stage.innerHTML = html;
+    const f = last[0].info;
+    cap.textContent = n === 1 ? `시드 ${V.seed} · ${KO[f.build]} · ${KO[f.pose]} · ${KO[f.coat]}` : `시드 ${V.seed} · ${n}마리`;
+    writeQuery(V, DEFAULTS);
+  }
+  function newSeed() { V.seed = String(Math.floor(Math.random() * 1e6)); panel.set('seed', V.seed); render(); }
+  function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
+  function fullSVG() { return horsedraw.toSVG(last[0], { ink: V.ink, paper: V.paper, stroke: V.stroke }); }
+
+  const opts = (keys) => [['auto', '무작위']].concat(keys.map((k) => [k, KO[k]]));
+  const panel = makePanel({
+    title: '線馬 · 파라미터', values: V,
+    groups: [
+      { name: '시드', items: [{ key: 'seed', label: '시드', type: 'text' }] },
+      { name: '말', items: [
+        { key: 'build', label: '체형', type: 'select', options: opts(['light', 'stock', 'draft', 'pony', 'foal']) },
+        { key: 'pose', label: '자세', type: 'select', options: opts(['stand', 'walk', 'trot', 'gallop', 'rear', 'graze']) },
+        { key: 'coat', label: '무늬', type: 'select', options: opts(['plain', 'shade', 'pinto', 'dapple', 'zebra']) },
+        { key: 'mane', label: '갈기 길이', type: 'range', min: -1, max: 1.6, step: 0.05, fmt: (v) => v < 0 ? '무작위' : v.toFixed(2) },
+      ] },
+      { name: '선', items: [
+        { key: 'wobble', label: '손떨림', type: 'range', min: 0, max: 3, step: 0.05 },
+        { key: 'stroke', label: '선 굵기', type: 'range', min: 0.5, max: 3, step: 0.1 },
+        { key: 'ink', label: '먹색', type: 'color' },
+        { key: 'paper', label: '종이색', type: 'color' },
+        { key: 'animate', label: '그리는 과정 보기', type: 'check' },
+      ] },
+      { name: '화면', items: [{ key: 'count', label: '마리 수', type: 'select', numeric: true, options: [[1, '1'], [4, '4'], [6, '6'], [9, '9']] }] },
+    ],
+    onChange: (key, val) => { V[key] = val; render(); },
+    actions: [
+      { label: '새 말', primary: true, onClick: newSeed },
+      { label: 'SVG 저장', onClick: () => download(`horse-${V.seed}.svg`, new Blob([fullSVG()], { type: 'image/svg+xml' })) },
+      { label: 'PNG 저장', onClick: () => {
+        const img = new Image();
+        img.onload = () => { const c = document.createElement('canvas'); c.width = 1600; c.height = 1200; c.getContext('2d').drawImage(img, 0, 0, 1600, 1200); c.toBlob((b) => download(`horse-${V.seed}.png`, b)); };
+        img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(fullSVG());
+      } },
+    ],
+    credit: '말 생성 코드(horsedraw.js)는 이 사이트에서 새로 쓴 것입니다. 선으로만 그리는 방식은 Lingdong Huang의 <a href="https://github.com/LingDong-/fishdraw">fishdraw</a>에서 착안했습니다.',
+  });
+  stage.addEventListener('click', newSeed);
+  addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); newSeed(); } });
+  render();
+})();
+</script>
+</body>
+</html>

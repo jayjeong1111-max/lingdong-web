@@ -1,6 +1,6 @@
 # 山水·非花 — 절차적 동양화 모음
 
-수학 함수와 노이즈만으로 그리는 절차적 동양화 세 점을 한 사이트로 묶었습니다. 빌드 과정이 없는 정적 사이트라서 폴더를 그대로 아무 정적 호스팅(GitHub Pages, Vercel, Netlify 등)에 올리면 됩니다.
+수학 함수와 노이즈만으로 그리는 절차적 그림 네 점을 한 사이트로 묶었습니다. 빌드 과정이 없는 정적 사이트라서 폴더를 그대로 아무 정적 호스팅(GitHub Pages, Vercel, Netlify 등)에 올리면 됩니다.
 
 | 경로 | 작품 | 내용 |
 |---|---|---|
@@ -8,6 +8,7 @@
 | `/shan-shui-inf/` | 무한 산수 {山, 水}* | 옆으로 끝없이 이어지는 SVG 산수 두루마리 |
 | `/nonflowers/` | 존재하지 않는 꽃 非花 | 공필화풍으로 그린, 세상에 없는 꽃 |
 | `/fish-garden/` | 꽃밭 위의 물고기 魚遊花田 | 꽃 한 종으로 피운 꽃밭 위를 무작위 물고기들이 헤엄침. 원본 먹선 / 혼합 / p5.brush 수채 화풍 |
+| `/horse/` | 선으로 그린 말 線馬 | 뼈대를 무작위로 잡아 선만으로 그리는 말. 체형 5종 · 자세 6종 · 무늬 5종, SVG/PNG 저장 (이 사이트에서 새로 쓴 `horsedraw.js`) |
 
 모든 페이지 오른쪽 위의 **⚙ 파라미터** 패널에서 생성 값을 바꿀 수 있고, 바꾼 값은 주소(`?seed=…&…`)에 저장되어 링크로 공유할 수 있습니다.
 
@@ -28,6 +29,7 @@ fish-garden/          꽃밭 위의 물고기 (index.html, fish-worker.js)
 nonflowers/           Nonflowers 원본 + studio.js(파라미터 패널)
 shan-shui-inf/        Shan Shui Infinite 원본 + studio.js(파라미터 패널)
 fishdraw/             fishdraw 원본
+horse/                선으로 그린 말 (horsedraw.js: 이 사이트에서 새로 쓴 생성기, index.html)
 vendor/p5.brush/      p5.brush 2.2.3 (dist, src, LICENSE)
 ```
 
