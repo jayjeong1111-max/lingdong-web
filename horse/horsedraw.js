@@ -8,7 +8,11 @@
 
   function horsedraw(opt) {
     opt = opt || {};
-    const R = mulberry(hashStr(String(opt.seed == null ? Date.now() : opt.seed)));
+    const seedStr = String(opt.seed == null ? Date.now() : opt.seed);
+    let R = mulberry(hashStr(seedStr));
+    // each part draws from its own random stream, so the same seed gives the same horse in every animation frame
+    const reseed = (tag) => { R = mulberry(hashStr(seedStr + '|' + tag)); };
+    const phase = ((+opt.phase || 0) % 1 + 1) % 1, TAU = Math.PI * 2;
     const rnd = (a, b) => a + (b - a) * R();
     const pick = (arr) => arr[Math.floor(R() * arr.length)];
     const nseed = R() * 1000;
@@ -76,31 +80,38 @@
       pony:  { depth: 0.56, leg: 0.74, thick: 1.15, neck: 0.80, head: 1.20, belly: 1.12 },   // 조랑말
       foal:  { depth: 0.40, leg: 1.30, thick: 0.72, neck: 0.85, head: 1.12, belly: 0.92 },   // 망아지
     };
-    const buildName = BUILDS[opt.build] ? opt.build : pick(['light', 'stock', 'stock', 'draft', 'pony', 'foal']);
+    const pb_ = pick(['light', 'stock', 'stock', 'draft', 'pony', 'foal']);
+    const buildName = BUILDS[opt.build] ? opt.build : pb_;
     const B = BUILDS[buildName];
-    const poseName = ['stand', 'walk', 'trot', 'gallop', 'rear', 'graze'].includes(opt.pose) ? opt.pose : pick(['stand', 'stand', 'walk', 'walk', 'trot', 'gallop', 'rear', 'graze']);
-    const coatName = ['plain', 'shade', 'pinto', 'dapple', 'zebra'].includes(opt.coat) ? opt.coat : pick(['plain', 'shade', 'shade', 'pinto', 'dapple', 'zebra']);
-    const maneLen = opt.mane == null ? rnd(0.3, 1.3) : +opt.mane;
+    const pp_ = pick(['stand', 'stand', 'walk', 'walk', 'trot', 'gallop', 'rear', 'graze']);
+    const poseName = ['stand', 'walk', 'trot', 'gallop', 'rear', 'graze', 'run'].includes(opt.pose) ? opt.pose : pp_;
+    const run = poseName === 'run';
+    const pc_ = pick(['plain', 'shade', 'shade', 'pinto', 'dapple', 'zebra']);
+    const coatName = ['plain', 'shade', 'pinto', 'dapple', 'zebra'].includes(opt.coat) ? opt.coat : pc_;
+    const pm_ = rnd(0.3, 1.3);
+    const maneLen = opt.mane == null ? pm_ : +opt.mane;
     const wobble = opt.wobble == null ? 1 : +opt.wobble;
 
     const L = buildName === 'foal' ? 150 : buildName === 'pony' ? 185 : 210;   // withers → hip
     const D = L * B.depth * rnd(0.94, 1.06);                                   // chest depth
     const TH = B.thick * rnd(0.92, 1.1);
-    const moving = poseName === 'trot' || poseName === 'gallop' ? 1 : poseName === 'walk' ? 0.4 : poseName === 'rear' ? 0.7 : 0;
+    const moving = run || poseName === 'trot' || poseName === 'gallop' ? 1 : poseName === 'walk' ? 0.4 : poseName === 'rear' ? 0.7 : 0;
     const j = (a) => rnd(-a, a);
 
-    let rot = 0, neckA = rnd(0.55, 0.85), headA = rnd(0.95, 1.25);
+    reseed('pose');
+    let rot = 0, neckA = rnd(0.55, 0.85), headA = rnd(0.95, 1.25), bob = 0;
     if (poseName === 'rear') { rot = -rnd(0.55, 0.8); neckA = rnd(0.9, 1.2); headA = rnd(1.2, 1.5); }
     if (poseName === 'graze') { neckA = rnd(2.0, 2.25); headA = rnd(1.25, 1.45); }
     if (poseName === 'gallop') { neckA = rnd(1.0, 1.2); headA = rnd(0.6, 0.85); rot = j(0.06); }
     if (poseName === 'trot') { neckA = rnd(0.5, 0.75); headA = rnd(1.15, 1.4); }
+    if (run) { rot = 0.07 * Math.sin(TAU * phase + 0.6); neckA = 1.05 + 0.1 * Math.sin(TAU * phase + 2.2); headA = 0.78 + 0.07 * Math.sin(TAU * phase + 1.2); bob = -6 * Math.sin(TAU * phase + 2.6); }
     const neckLen = L * 0.56 * B.neck * rnd(0.92, 1.08);
     const headLen = L * 0.43 * B.head * rnd(0.94, 1.06);
     const sway = rnd(0.4, 1.6), crest = rnd(0.05, 0.16) * (buildName === 'draft' ? 1.5 : 1), dish = rnd(-0.03, 0.035);
 
     // body frame: withers at (0,0), hip at (-L,0), facing +x; rotated about the hip for rearing
     const HIP = [-L, 0];
-    const T = (p) => { const x = p[0] - HIP[0], y = p[1] - HIP[1], c = Math.cos(rot), s = Math.sin(rot); return [HIP[0] + x * c - y * s, HIP[1] + x * s + y * c]; };
+    const T = (p) => { const x = p[0] - HIP[0], y = p[1] - HIP[1], c = Math.cos(rot), s = Math.sin(rot); return [HIP[0] + x * c - y * s, HIP[1] + x * s + y * c + bob]; };
     const bp = (x, y) => T([x * L, y * D]);
 
     // ---------- body + neck + head contour (one closed line) ----------
@@ -180,6 +191,15 @@
     }
     const pl = (arr) => { arr.plant = true; return arr; };
     let fN, fF, hN, hF;
+    reseed('legs');
+    // periodic interpolation through evenly spaced key poses
+    const cyc = (keys, t) => {
+      t = ((t % 1) + 1) % 1; const n = keys.length, f = t * n, i = Math.floor(f), u_ = f - i, K = (k) => keys[((k % n) + n) % n];
+      return K(i).map((_, d) => { const p0 = K(i - 1)[d], p1 = K(i)[d], p2 = K(i + 1)[d], p3 = K(i + 2)[d]; return 0.5 * (2 * p1 + (-p0 + p2) * u_ + (2 * p0 - 5 * p1 + 4 * p2 - p3) * u_ * u_ + (-p0 + 3 * p1 - 3 * p2 + p3) * u_ * u_ * u_); });
+    };
+    const FORE = [[0.8, 0.55, 0.6], [0.05, 0.0, 0.55], [-0.6, -0.5, 0.15], [-0.15, -1.45, -1.2], [0.9, -0.85, -0.9]];           // reach, stance, push, lift, fold
+    const HIND = [[1.0, -0.1, 0.5, 0.7], [0.5, -0.55, 0.05, 0.55], [0.2, -1.15, -0.85, -0.2], [0.45, -1.0, -1.5, -1.3], [0.9, -0.3, -0.6, -0.4]];
+    if (run) { hN = cyc(HIND, phase); hF = cyc(HIND, phase - 0.1); fF = cyc(FORE, phase - 0.45); fN = cyc(FORE, phase - 0.55); } else
     if (poseName === 'stand' || poseName === 'graze') {
       const g = poseName === 'graze' ? 0.12 : 0;
       fN = pl([j(0.07) + g, j(0.04), 0.5]); fF = pl([j(0.1) - g * 1.5, j(0.04), 0.5]);
@@ -203,9 +223,8 @@
     // ---------- assemble with hidden-line removal ----------
     const lines = [];                              // {pl, w}
     const push = (p, w) => { if (p.length > 1) lines.push({ pl: p, w: w || 1 }); };
-    // only the part of a near leg that is actually drawn may hide the body line (otherwise the chest/neck line gets a gap)
-    const visPoly = (lg) => { const k0 = Math.floor(lg.lm.left.length * lg.skip); return lg.lm.left.slice(k0).concat(lg.lm.right.slice(k0).reverse()); };
-    const nearPolys = [visPoly(legs.fN), visPoly(legs.hN), legs.fN.hoof, legs.hN.hoof];
+    // the whole near-leg shape hides the body line, even its undrawn top: that leaves the little gap at the chest/neck the sketch is liked for
+    const nearPolys = [legs.fN.lm.poly, legs.hN.lm.poly, legs.fN.hoof, legs.hN.hoof];
     const frontOf = (polys) => (p) => !polys.some((q) => inPoly(p, q));
 
     function drawLeg(lg, masks) {
@@ -241,6 +260,7 @@
     drawLeg(legs.fN, []); drawLeg(legs.hN, []);
 
     // ---------- face ----------
+    reseed('face');
     const hpRaw = hp; { const c = Math.cos(rot), s = Math.sin(rot); const ru = [u[0] * c - u[1] * s, u[0] * s + u[1] * c]; u[0] = ru[0]; u[1] = ru[1]; v[0] = -u[1]; v[1] = u[0]; }
     const pollT = T(poll);
     hp = (s, t) => add(pollT, add(mul(u, s * headLen), mul(v, t * headLen)));
@@ -266,6 +286,7 @@
     if (R() < 0.6) hint([bp(-0.3, 0.75), bp(-0.5, 0.85), bp(-0.68, 0.8)], 0.5);   // ribs/belly
 
     // ---------- coat ----------
+    reseed('coat');
     const allNear = [bodyPoly];
     const onHorse = (p) => inPoly(p, bodyPoly);
     const [bx0, by0, bx1, by1] = bbox(bodyPoly);
@@ -281,7 +302,7 @@
       }
     } else if (coatName === 'dapple') {
       for (let i = 0; i < 90; i++) {
-        const c = [rnd(bx0, bx1), rnd(by0, by1)], r = rnd(3, 7);
+        const c = bp(rnd(-1.12, 0.2), rnd(-0.1, 1.05)), r = rnd(3, 7);
         if (!onHorse(c)) continue;
         const ring = []; const a0 = R() * 6.28, span = rnd(3.5, 5.8);
         for (let a = 0; a <= span; a += 0.35) ring.push([c[0] + Math.cos(a0 + a) * r, c[1] + Math.sin(a0 + a) * r * 0.85]);
@@ -306,11 +327,12 @@
     }
 
     // ---------- mane, forelock, tail ----------
+    reseed('hair');
     const blow = moving * rnd(0.6, 1.1);
     function hair(root, dir, len, curl, w) {
       const pts = [root]; let p = root, a = Math.atan2(dir[1], dir[0]);
       const n = 9, fq = rnd(0.5, 1.5), ph = R() * 9;
-      for (let i = 1; i <= n; i++) { a += curl / n + (noise(i * fq + ph, ph) - 0.5) * 0.55; p = add(p, [Math.cos(a) * len / n, Math.sin(a) * len / n]); pts.push(p); }
+      for (let i = 1; i <= n; i++) { a += curl / n + (noise(i * fq + ph, ph) - 0.5) * 0.55 + (run ? 0.13 * Math.sin(TAU * phase - i * 0.75 + ph) : 0); p = add(p, [Math.cos(a) * len / n, Math.sin(a) * len / n]); pts.push(p); }
       push(resample(spline(pts, false, 5), 2), w || 0.8);
       return pts;
     }
@@ -332,28 +354,34 @@
     }
     const dock = T([-1.1 * L, 0.2 * D]);
     const tailLen = L * rnd(0.55, 0.95) * (buildName === 'foal' ? 0.55 : 1);
-    const tdir = poseName === 'gallop' || poseName === 'trot' ? [-1, rnd(-0.25, 0.25)] : poseName === 'rear' ? [-0.5, 1] : [-0.22 - R() * 0.2, 1];
+    const tdir = run || poseName === 'gallop' || poseName === 'trot' ? [-1, rnd(-0.25, 0.25)] : poseName === 'rear' ? [-0.5, 1] : [-0.22 - R() * 0.2, 1];
     for (let i = 0; i < 46; i++) tailPts.push(...hair(add(dock, [j(3), j(5)]), [tdir[0] + j(0.12), tdir[1] + j(0.12)], tailLen * rnd(0.7, 1.1), (tdir[1] < 0.5 ? 1.1 : -0.25) + j(0.45), 0.8));
 
     // ---------- ground ----------
-    const gy = Math.max(...Object.values(legs).map((l) => bbox(l.hoof)[3]));
+    reseed('ground');
+    const gy = run ? groundY + 3 : Math.max(...Object.values(legs).map((l) => bbox(l.hoof)[3]));
+    const gx0 = -L * 2.3, gW = L * 3.6, gx = (x) => gx0 + ((((x - gx0) - phase * gW) % gW) + gW) % gW;   // ground scrolls back while running
     for (let i = 0; i < 9; i++) {
-      const x = rnd(bx0 - 60, bx1 + 20), w = rnd(30, 150), y = gy + 2 + rnd(0, 9) * (i ? 1 : 0);
+      let x = rnd(bx0 - 60, bx1 + 20), w = rnd(30, 150); const y = gy + 2 + rnd(0, 9) * (i ? 1 : 0);
+      if (run) { x = gx(gx0 + R() * gW); w = Math.min(w * 0.5, gx0 + gW - x); }
       push(resample([[x, y], [x + w, y + j(1.5)]], 3), 0.7);
     }
-    for (let i = 0; i < 26; i++) { const x = rnd(bx0 - 70, bx1 + 50), y = gy + rnd(1, 8), hgt = rnd(4, 13); push([[x, y], [x + j(3), y - hgt * 0.5], [x + j(6), y - hgt]], 0.6); }
+    for (let i = 0; i < 26; i++) { let x = rnd(bx0 - 70, bx1 + 50); if (run) x = gx(gx0 + R() * gW); const y = gy + rnd(1, 8), hgt = rnd(4, 13); push([[x, y], [x + j(3), y - hgt * 0.5], [x + j(6), y - hgt]], 0.6); }
 
     // ---------- hand wobble + fit to frame ----------
     const all = [];
+    reseed('wobble'); const ph = R() * 100;
     for (const ln of lines) {
-      const ph = R() * 100;
       const p = ln.pl.map((q) => [q[0] + (noise(q[0] * 0.035 + ph, q[1] * 0.035) - 0.5) * 3.2 * wobble, q[1] + (noise(q[0] * 0.035, q[1] * 0.035 + ph) - 0.5) * 3.2 * wobble]);
       all.push({ pl: p, w: ln.w });
     }
     let X0 = 1e9, Y0 = 1e9, X1 = -1e9, Y1 = -1e9;
     for (const ln of all) for (const p of ln.pl) { X0 = Math.min(X0, p[0]); Y0 = Math.min(Y0, p[1]); X1 = Math.max(X1, p[0]); Y1 = Math.max(Y1, p[1]); }
-    const Wd = 800, Ht = 600, pad = 50, s = Math.min((Wd - pad * 2) / (X1 - X0), (Ht - pad * 2) / (Y1 - Y0), 1.6);
-    const ox = (Wd - (X1 - X0) * s) / 2 - X0 * s, oy = (Ht - (Y1 - Y0) * s) / 2 - Y0 * s;
+    const Wd = 800, Ht = 600, pad = 50;
+    let s = Math.min((Wd - pad * 2) / (X1 - X0), (Ht - pad * 2) / (Y1 - Y0), 1.6);
+    let ox = (Wd - (X1 - X0) * s) / 2 - X0 * s, oy = (Ht - (Y1 - Y0) * s) / 2 - Y0 * s;
+    if (run) { s = Math.min(1.15, 300 / L); ox = Wd / 2 + 0.42 * L * s; oy = Ht * 0.83 - groundY * s; }   // fixed frame so the animation does not jump
+    reseed('flip');
     const flip = opt.flip == null ? R() < 0.5 : !!opt.flip;
     for (const ln of all) ln.pl = ln.pl.map((p) => { const x = p[0] * s + ox; return [Math.round((flip ? Wd - x : x) * 10) / 10, Math.round((p[1] * s + oy) * 10) / 10]; });
     // paintable regions (same frame as the lines) for colouring
