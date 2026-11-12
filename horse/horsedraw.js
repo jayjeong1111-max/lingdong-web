@@ -203,7 +203,9 @@
     // ---------- assemble with hidden-line removal ----------
     const lines = [];                              // {pl, w}
     const push = (p, w) => { if (p.length > 1) lines.push({ pl: p, w: w || 1 }); };
-    const nearPolys = [legs.fN.lm.poly, legs.hN.lm.poly, legs.fN.hoof, legs.hN.hoof];
+    // only the part of a near leg that is actually drawn may hide the body line (otherwise the chest/neck line gets a gap)
+    const visPoly = (lg) => { const k0 = Math.floor(lg.lm.left.length * lg.skip); return lg.lm.left.slice(k0).concat(lg.lm.right.slice(k0).reverse()); };
+    const nearPolys = [visPoly(legs.fN), visPoly(legs.hN), legs.fN.hoof, legs.hN.hoof];
     const frontOf = (polys) => (p) => !polys.some((q) => inPoly(p, q));
 
     function drawLeg(lg, masks) {
@@ -310,24 +312,28 @@
       const n = 9, fq = rnd(0.5, 1.5), ph = R() * 9;
       for (let i = 1; i <= n; i++) { a += curl / n + (noise(i * fq + ph, ph) - 0.5) * 0.55; p = add(p, [Math.cos(a) * len / n, Math.sin(a) * len / n]); pts.push(p); }
       push(resample(spline(pts, false, 5), 2), w || 0.8);
+      return pts;
     }
     const TW = (p) => T(p);
     const crestPt = (t) => TW(add(add(W0, mul(nd, neckLen * t)), mul(nn, -crest * neckLen * Math.sin(Math.PI * Math.min(1, t * 1.05)) * 0.95)));
     const mLen = neckLen * 0.42 * maneLen;
+    const maneRoots = [], maneTips = [], tailPts = [];
     if (maneLen > 0.05) {
       const count = Math.round(34 + maneLen * 26);
       for (let i = 0; i < count; i++) {
         const t = 0.04 + 0.95 * i / count + j(0.01);
         const base = crestPt(t);
-        if (maneLen < 0.3) hair(base, [-Math.cos(neckA + rot) * 0.2 - blow * 0.3, -1], mLen * rnd(0.8, 1.6) + 4, j(0.3), 0.8);        // roached
-        else hair(base, [-0.25 - blow * 1.6, 1 - blow * 0.55], mLen * rnd(0.6, 1.15) * (0.6 + 0.6 * Math.sin(Math.PI * t)), j(0.5) - blow * 0.5, 0.8);
+        let hp_;
+        if (maneLen < 0.3) hp_ = hair(base, [-Math.cos(neckA + rot) * 0.2 - blow * 0.3, -1], mLen * rnd(0.8, 1.6) + 4, j(0.3), 0.8);        // roached
+        else hp_ = hair(base, [-0.25 - blow * 1.6, 1 - blow * 0.55], mLen * rnd(0.6, 1.15) * (0.6 + 0.6 * Math.sin(Math.PI * t)), j(0.5) - blow * 0.5, 0.8);
+        maneRoots.push(base); maneTips.push(hp_[hp_.length - 1]);
       }
       for (let i = 0; i < 9; i++) hair(hp(0.02 + i * 0.012, -0.03), [u[0] * 0.8 - blow * 0.6, u[1] * 0.9 + 0.3], headLen * rnd(0.14, 0.3) * Math.min(1.2, maneLen + 0.3), j(0.5), 0.8);
     }
     const dock = T([-1.1 * L, 0.2 * D]);
     const tailLen = L * rnd(0.55, 0.95) * (buildName === 'foal' ? 0.55 : 1);
     const tdir = poseName === 'gallop' || poseName === 'trot' ? [-1, rnd(-0.25, 0.25)] : poseName === 'rear' ? [-0.5, 1] : [-0.22 - R() * 0.2, 1];
-    for (let i = 0; i < 46; i++) hair(add(dock, [j(3), j(5)]), [tdir[0] + j(0.12), tdir[1] + j(0.12)], tailLen * rnd(0.7, 1.1), (tdir[1] < 0.5 ? 1.1 : -0.25) + j(0.45), 0.8);
+    for (let i = 0; i < 46; i++) tailPts.push(...hair(add(dock, [j(3), j(5)]), [tdir[0] + j(0.12), tdir[1] + j(0.12)], tailLen * rnd(0.7, 1.1), (tdir[1] < 0.5 ? 1.1 : -0.25) + j(0.45), 0.8));
 
     // ---------- ground ----------
     const gy = Math.max(...Object.values(legs).map((l) => bbox(l.hoof)[3]));
@@ -350,7 +356,27 @@
     const ox = (Wd - (X1 - X0) * s) / 2 - X0 * s, oy = (Ht - (Y1 - Y0) * s) / 2 - Y0 * s;
     const flip = opt.flip == null ? R() < 0.5 : !!opt.flip;
     for (const ln of all) ln.pl = ln.pl.map((p) => { const x = p[0] * s + ox; return [Math.round((flip ? Wd - x : x) * 10) / 10, Math.round((p[1] * s + oy) * 10) / 10]; });
-    return { polylines: all, w: Wd, h: Ht, info: { build: buildName, pose: poseName, coat: coatName } };
+    // paintable regions (same frame as the lines) for colouring
+    const fin = (p) => { const x = p[0] * s + ox; return [flip ? Wd - x : x, p[1] * s + oy]; };
+    const thin = (poly, k) => poly.filter((_, i) => i % k === 0).map(fin);
+    function hull(pts) {
+      const P = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]), cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+      const lo = [], up = [];
+      for (const q of P) { while (lo.length > 1 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+      for (const q of P.reverse()) { while (up.length > 1 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+      return lo.slice(0, -1).concat(up.slice(0, -1));
+    }
+    const legReg = (lg) => { const k0 = Math.floor(lg.lm.left.length * lg.skip * 0.5); return { far: lg.far, poly: lg.lm.left.slice(k0).concat(lg.lm.right.slice(k0).reverse()).filter((_, i) => i % 3 === 0).map(fin) }; };
+    const regions = {
+      body: thin(bodyPoly, 4),
+      legs: [legs.fF, legs.hF, legs.fN, legs.hN].map(legReg),
+      hooves: Object.values(legs).map((l) => l.hoof.map(fin)),
+      mane: maneRoots.length > 2 ? maneRoots.concat(maneTips.slice().reverse()).map(fin) : null,
+      tail: hull(tailPts).map(fin),
+      blobs: [bp(-0.82, 0.35), bp(0.0, 0.5), bp(-0.42, 0.72), T(add(poll, mul(u, 0))) ].map((c) => fin(c).concat([0.3 * D * s])),
+      scale: s,
+    };
+    return { polylines: all, regions, w: Wd, h: Ht, info: { build: buildName, pose: poseName, coat: coatName } };
   }
 
   horsedraw.toSVG = function (res, o) {
@@ -358,6 +384,7 @@
     const ink = o.ink || '#1d1a17', bg = o.paper == null ? '#f6f1df' : o.paper, sw = o.stroke || 1.3;
     let out = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${res.w} ${res.h}" width="${res.w}" height="${res.h}">`;
     if (bg) out += `<rect width="100%" height="100%" fill="${bg}"/>`;
+    if (o.under) out += `<image href="${o.under}" x="0" y="0" width="${res.w}" height="${res.h}" style="mix-blend-mode:multiply"/>`;
     out += `<g fill="none" stroke="${ink}" stroke-linecap="round" stroke-linejoin="round">`;
     res.polylines.forEach((ln, i) => {
       const anim = o.animate ? ` pathLength="1" class="hd" style="animation-delay:${(i * (o.animate / res.polylines.length)).toFixed(3)}s"` : '';

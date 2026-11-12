@@ -12,7 +12,10 @@
   body { background: #f6f1df; color: #2a2622; font-family: "Noto Serif KR", serif; font-weight: 300; overflow: hidden; }
   a.back { position: fixed; top: 14px; left: 14px; z-index: 5; font-size: 13px; color: #2a2622; text-decoration: none; border-bottom: 1px solid #2a2622; }
   #stage { position: fixed; inset: 0; display: grid; gap: 0; place-items: center; cursor: pointer; padding: 44px 12px 40px; }
-  #stage svg { width: 100%; height: 100%; display: block; }
+  #stage { grid-auto-rows: minmax(0, 1fr); }
+  #stage svg { width: 100%; height: 100%; min-width: 0; min-height: 0; display: block; }
+  #wcbtn { position: fixed; top: 54px; right: 14px; z-index: 1001; font: 13px/1 "Noto Serif KR", serif; background: rgba(246,241,223,.92); color: #2a2622; border: 1px solid #2a2622; padding: 8px 12px; cursor: pointer; }
+  #wcbtn.on { background: #a8321e; border-color: #a8321e; color: #fff; }
   #cap { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; font-size: 12.5px; color: #7a6f62; pointer-events: none; }
   .hd { stroke-dasharray: 1; stroke-dashoffset: 1; animation: hd .5s ease-out forwards; }
   @keyframes hd { to { stroke-dashoffset: 0; } }
@@ -23,40 +26,110 @@
 <a class="back" href="../">← 山水·非花</a>
 <div id="stage" title="클릭하면 새 말"></div>
 <div id="cap"></div>
+<button id="wcbtn" type="button">수채 채색</button>
+<!-- p5.brush 2.2.3 standalone build (MIT, Alejandro Campos Uribe): watercolor fills -->
+<script src="../vendor/p5.brush/dist/brush.js"></script>
 <script src="../shared/panel.js"></script>
 <script src="horsedraw.js"></script>
 <script>
 (function () {
-  const DEFAULTS = { seed: '', build: 'auto', pose: 'auto', coat: 'auto', mane: -1, wobble: 1, stroke: 1.3, count: 1, animate: true, ink: '#1d1a17', paper: '#f6f1df' };
+  const DEFAULTS = { seed: '', build: 'auto', pose: 'auto', coat: 'auto', mane: -1, wobble: 1, stroke: 1.3, count: 1, animate: true, ink: '#1d1a17', paper: '#f6f1df',
+                     color: false, palette: 'any', wcOpacity: 120, wcBleed: 0.25, wcTexture: 0.5, bgWash: true };
   const V = readQuery(DEFAULTS);
   if (!V.seed) V.seed = String(Math.floor(Math.random() * 1e6));
   const stage = document.getElementById('stage'), cap = document.getElementById('cap');
   const KO = { light: '경주마', stock: '보통 말', draft: '짐말', pony: '조랑말', foal: '망아지',
                stand: '서 있음', walk: '걷기', trot: '속보', gallop: '질주', rear: '앞발 들기', graze: '풀 뜯기',
                plain: '민무늬', shade: '음영', pinto: '얼룩', dapple: '연전', zebra: '줄무늬' };
-  let last = [];
+  let last = [], unders = [], token = 0;
+
+  // ---------- random palette ----------
+  function rng(str) { let h = 2166136261; for (const c of str) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return () => { h |= 0; h = h + 0x6D2B79F5 | 0; let t = Math.imul(h ^ h >>> 15, 1 | h); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function hsl(h, s, l) { h = ((h % 360) + 360) % 360; s /= 100; l /= 100; const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l); const f = (n) => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)))).toString(16).padStart(2, '0'); return '#' + f(0) + f(8) + f(4); }
+  const NATURAL = [   // body, patch, mane/tail, legs
+    ['#a8623a', '#7d4526', '#2b2320', '#3a2c26'],   // 밤색 (bay)
+    ['#b5683c', '#d18b55', '#c98a52', '#b5683c'],   // 구렁말 (chestnut)
+    ['#d9b36c', '#e8cf9a', '#f3ead6', '#cfa862'],   // 팔로미노
+    ['#9aa0a6', '#c9ccd0', '#5d6166', '#6f757b'],   // 회색
+    ['#3a3532', '#59504a', '#1f1c1a', '#2b2725'],   // 가라말 (black)
+    ['#c9a878', '#a98658', '#3b2f28', '#4a3b31'],   // 황부루 (dun)
+    ['#e9e2d2', '#8a5a3c', '#d8cdb8', '#d9d0bd'],   // 얼룩 바탕
+  ];
+  function palette(seed) {
+    const R = rng('pal' + seed), mode = V.palette === 'any' ? (R() < 0.45 ? 'natural' : 'wild') : V.palette;
+    if (mode === 'natural') { const n = NATURAL[Math.floor(R() * NATURAL.length)]; return { body: n[0], patch: n[1], hair: n[2], legs: n[3], hoof: '#4a4541', bg: hsl(R() * 360, 35, 78) }; }
+    const h = R() * 360, d = [30, 60, 150, 180, 210][Math.floor(R() * 5)] * (R() < 0.5 ? -1 : 1);
+    return { body: hsl(h, 55 + R() * 30, 52 + R() * 16), patch: hsl(h + d * 0.5, 60 + R() * 25, 45 + R() * 20), hair: hsl(h + d, 60 + R() * 30, 35 + R() * 30),
+             legs: hsl(h + (R() < 0.5 ? 0 : d), 50 + R() * 30, 35 + R() * 20), hoof: hsl(h + d, 25, 28), bg: hsl(h + 180 + (R() - 0.5) * 80, 45, 80) };
+  }
+
+  // ---------- watercolor underpainting (p5.brush) ----------
+  const WS = 1.5, wc = document.createElement('canvas'); wc.width = 800 * WS; wc.height = 600 * WS;
+  function paintHorse(res, seed) {
+    const R = rng('wc' + seed), C = palette(seed), g = res.regions, K = (poly) => poly.map((p) => [p[0] * WS, p[1] * WS]);
+    const blob = (x, y, r, n) => { const out = [], ph = R() * 9; n = n || 14; for (let i = 0; i < n; i++) { const a = i / n * 6.283, rr = r * (0.7 + 0.5 * R()); out.push([(x + Math.cos(a + ph) * rr * 1.25) * WS, (y + Math.sin(a + ph) * rr) * WS]); } return out; };
+    let n = 0; for (const c of seed) n = n * 31 + c.charCodeAt(0) | 0;
+    brush.seed(n); brush.noiseSeed(n + 7);
+    brush.load(wc); brush.clear(); brush.push(); brush.translate(-wc.width / 2, -wc.height / 2);
+    brush.noStroke(); brush.noField();
+    brush.fillBleed(V.wcBleed); brush.fillTexture(V.wcTexture, 0.5);
+    const op = V.wcOpacity;
+    if (V.bgWash) {
+      const b = g.body.reduce((a, p) => [a[0] + p[0], a[1] + p[1]], [0, 0]).map((v) => v / g.body.length);
+      brush.fill(C.bg, op * 0.5); brush.polygon(blob(b[0], b[1], 150 * g.scale + 60));
+      if (R() < 0.6) { brush.fill(C.bg, op * 0.4); brush.polygon(blob(b[0] + (R() - 0.5) * 200, b[1] + 120 * g.scale, 90)); }
+    }
+    for (const lg of g.legs) if (lg.far) { brush.fill(C.legs, op * 0.9); brush.polygon(K(lg.poly)); }
+    if (g.tail.length > 2) { brush.fill(C.hair, op * 0.95); brush.polygon(K(g.tail)); }
+    brush.fill(C.body, op); brush.polygon(K(g.body));
+    for (const lg of g.legs) if (!lg.far) { brush.fill(R() < 0.5 ? C.legs : C.body, op * 0.8); brush.polygon(K(lg.poly)); }
+    for (const [x, y, r] of g.blobs.slice(0, 3)) if (R() < 0.75) { brush.fill(C.patch, op * 0.7); brush.polygon(blob(x, y, r * (0.7 + R() * 0.7), 10)); }
+    if (g.mane) { brush.fill(C.hair, op * 0.95); brush.polygon(K(g.mane)); }
+    brush.fill(C.hoof, op); for (const h of g.hooves) brush.polygon(K(h));
+    brush.noFill(); brush.pop(); brush.render();
+    return wc.toDataURL('image/png');
+  }
 
   function render() {
-    const n = +V.count, cols = n === 1 ? 1 : n <= 4 ? 2 : 3;
+    const n = +V.count, tall = innerHeight > innerWidth * 1.15, cols = n === 1 ? 1 : tall ? (n <= 4 ? 1 : 2) : n <= 4 ? 2 : 3;
     stage.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
     document.body.style.background = V.paper;
-    last = []; let html = '';
+    last = []; unders = []; let html = ''; const my = ++token;
     for (let i = 0; i < n; i++) {
       const res = horsedraw({ seed: V.seed + (i ? '-' + i : ''), build: V.build, pose: V.pose, coat: V.coat, mane: V.mane < 0 ? null : V.mane, wobble: V.wobble });
       last.push(res);
-      html += horsedraw.toSVG(res, { ink: V.ink, paper: '', stroke: V.stroke, animate: V.animate ? 1.6 : 0 });
+      html += horsedraw.toSVG(res, { ink: V.ink, paper: V.paper, stroke: V.stroke, animate: V.animate ? 1.6 : 0 });
     }
     stage.innerHTML = html;
     const f = last[0].info;
     cap.textContent = n === 1 ? `시드 ${V.seed} · ${KO[f.build]} · ${KO[f.pose]} · ${KO[f.coat]}` : `시드 ${V.seed} · ${n}마리`;
     writeQuery(V, DEFAULTS);
+    if (V.color) {            // paint after the lines are on screen
+      const svgs = [...stage.querySelectorAll('svg')];
+      const step = (i) => {
+        if (my !== token || i >= last.length) { if (my === token) panel && panel.busy(''); return; }
+        panel && panel.busy('수채 물감을 칠하는 중…');
+        setTimeout(() => {
+          if (my !== token) return;
+          try {
+            const url = paintHorse(last[i], V.seed + (i ? '-' + i : '')); unders[i] = url;
+            const im = document.createElementNS('http://www.w3.org/2000/svg', 'image');
+            im.setAttribute('href', url); im.setAttribute('width', 800); im.setAttribute('height', 600);
+            im.style.mixBlendMode = 'multiply'; im.style.opacity = 0; im.style.transition = 'opacity .8s';
+            svgs[i].insertBefore(im, svgs[i].querySelector('g')); requestAnimationFrame(() => { im.style.opacity = 1; });
+          } catch (e) { console.error(e); }
+          step(i + 1);
+        }, 30);
+      };
+      step(0);
+    }
   }
   function newSeed() { V.seed = String(Math.floor(Math.random() * 1e6)); panel.set('seed', V.seed); render(); }
   function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }
-  function fullSVG() { return horsedraw.toSVG(last[0], { ink: V.ink, paper: V.paper, stroke: V.stroke }); }
+  function fullSVG() { return horsedraw.toSVG(last[0], { ink: V.ink, paper: V.paper, stroke: V.stroke, under: V.color ? unders[0] : null }); }
 
   const opts = (keys) => [['auto', '무작위']].concat(keys.map((k) => [k, KO[k]]));
-  const panel = makePanel({
+  var panel = makePanel({
     title: '線馬 · 파라미터', values: V,
     groups: [
       { name: '시드', items: [{ key: 'seed', label: '시드', type: 'text' }] },
@@ -73,9 +146,17 @@
         { key: 'paper', label: '종이색', type: 'color' },
         { key: 'animate', label: '그리는 과정 보기', type: 'check' },
       ] },
+      { name: '수채 채색 (p5.brush)', hint: '시드마다 물감 색이 무작위로 정해집니다.', items: [
+        { key: 'color', label: '채색', type: 'check' },
+        { key: 'palette', label: '색', type: 'select', options: [['any', '무작위'], ['natural', '실제 말 색'], ['wild', '상상의 색']] },
+        { key: 'wcOpacity', label: '물감 농도', type: 'range', min: 30, max: 220, step: 5 },
+        { key: 'wcBleed', label: '번짐', type: 'range', min: 0, max: 0.6, step: 0.01 },
+        { key: 'wcTexture', label: '물자국', type: 'range', min: 0, max: 1, step: 0.05 },
+        { key: 'bgWash', label: '배경 번짐', type: 'check' },
+      ] },
       { name: '화면', items: [{ key: 'count', label: '마리 수', type: 'select', numeric: true, options: [[1, '1'], [4, '4'], [6, '6'], [9, '9']] }] },
     ],
-    onChange: (key, val) => { V[key] = val; render(); },
+    onChange: (key, val, all, done) => { V[key] = val; if (key === 'color') syncBtn(); if (['wcOpacity', 'wcBleed', 'wcTexture'].includes(key) && !done) return; render(); },
     actions: [
       { label: '새 말', primary: true, onClick: newSeed },
       { label: 'SVG 저장', onClick: () => download(`horse-${V.seed}.svg`, new Blob([fullSVG()], { type: 'image/svg+xml' })) },
@@ -85,8 +166,13 @@
         img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(fullSVG());
       } },
     ],
-    credit: '말 생성 코드(horsedraw.js)는 이 사이트에서 새로 쓴 것입니다. 선으로만 그리는 방식은 Lingdong Huang의 <a href="https://github.com/LingDong-/fishdraw">fishdraw</a>에서 착안했습니다.',
+    credit: '말 생성 코드(horsedraw.js)는 이 사이트에서 새로 쓴 것입니다. 선으로만 그리는 방식은 Lingdong Huang의 <a href="https://github.com/LingDong-/fishdraw">fishdraw</a>에서 착안했습니다.<br>수채: <a href="https://github.com/acamposuribe/p5.brush">p5.brush</a> 2.2.3 (Alejandro Campos Uribe, MIT)',
   });
+  const wcbtn = document.getElementById('wcbtn');
+  const syncBtn = () => { wcbtn.classList.toggle('on', !!V.color); wcbtn.textContent = V.color ? '수채 채색 켜짐' : '수채 채색'; };
+  wcbtn.onclick = () => { V.color = !V.color; panel.set('color', V.color); syncBtn(); render(); };
+  syncBtn();
+  addEventListener('resize', () => { clearTimeout(window.__rz); window.__rz = setTimeout(render, 200); });
   stage.addEventListener('click', newSeed);
   addEventListener('keydown', (e) => { if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); newSeed(); } });
   render();
