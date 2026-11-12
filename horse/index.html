@@ -11,13 +11,13 @@
   html, body { height: 100%; }
   body { background: #f6f1df; color: #2a2622; font-family: "Noto Serif KR", serif; font-weight: 300; overflow: hidden; }
   a.back { position: fixed; top: 14px; left: 14px; z-index: 5; font-size: 13px; color: #2a2622; text-decoration: none; border-bottom: 1px solid #2a2622; }
-  #stage { position: fixed; inset: 0; display: grid; gap: 0; place-items: center; cursor: pointer; padding: 44px 12px 40px; }
+  #stage { position: fixed; inset: 0; display: grid; gap: 0; place-items: center; cursor: pointer; padding: 44px 12px 86px; }
   #stage { grid-auto-rows: minmax(0, 1fr); }
   .cell { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; }
   .cell svg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-  button#runbtn { top: 94px; }
-  #wcbtn, #runbtn { position: fixed; top: 54px; right: 14px; z-index: 1001; font: 13px/1 "Noto Serif KR", serif; background: rgba(246,241,223,.92); color: #2a2622; border: 1px solid #2a2622; padding: 8px 12px; cursor: pointer; }
-  #wcbtn.on, #runbtn.on { background: #a8321e; border-color: #a8321e; color: #fff; }
+  #tools { position: fixed; left: 0; right: 0; bottom: 40px; z-index: 6; display: flex; justify-content: center; gap: 12px; pointer-events: none; }
+  #tools button { pointer-events: auto; min-width: 116px; font: 13px/1 "Noto Serif KR", serif; background: rgba(246,241,223,.92); color: #2a2622; border: 1px solid #2a2622; padding: 9px 14px; cursor: pointer; transition: background .2s, color .2s; }
+  #tools button.on { background: #a8321e; border-color: #a8321e; color: #fff; }
   #cap { position: fixed; left: 0; right: 0; bottom: 12px; text-align: center; font-size: 12.5px; color: #7a6f62; pointer-events: none; }
   .hd { stroke-dasharray: 1; stroke-dashoffset: 1; animation: hd .5s ease-out forwards; }
   @keyframes hd { to { stroke-dashoffset: 0; } }
@@ -28,8 +28,7 @@
 <a class="back" href="../">← 山水·非花</a>
 <div id="stage" title="클릭하면 새 말"></div>
 <div id="cap"></div>
-<button id="wcbtn" type="button">수채 채색</button>
-<button id="runbtn" type="button">달리기</button>
+<div id="tools"><button id="runbtn" type="button">달리기 ▶</button><button id="wcbtn" type="button">수채 채색</button></div>
 <!-- p5.brush 2.2.3 standalone build (MIT, Alejandro Campos Uribe): watercolor fills -->
 <script src="../vendor/p5.brush/dist/brush.js"></script>
 <script src="../shared/panel.js"></script>
